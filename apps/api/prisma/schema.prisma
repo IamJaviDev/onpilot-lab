@@ -11,3 +11,227 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum GlobalRole {
+  ONPILOT_ADMIN
+  USER
+}
+
+enum BusinessMemberRole {
+  BUSINESS_OWNER
+  STAFF
+}
+
+enum BusinessSector {
+  BEAUTY
+  PHYSIO
+  PSYCHOLOGY
+  NUTRITION
+  DENTAL
+  FITNESS
+  OTHER
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentSource {
+  MANUAL
+  WHATSAPP
+  IMPORT
+  SYSTEM
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BIZUM
+  TRANSFER
+  OTHER
+}
+
+enum PaymentStatus {
+  PAID
+  ERROR
+  REFUNDED
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(uuid(7)) @db.Uuid
+  email        String     @unique
+  passwordHash String
+  name         String
+  globalRole   GlobalRole @default(USER)
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  deletedAt    DateTime?
+
+  memberships         BusinessMember[]
+  createdAppointments Appointment[]
+  createdPayments     Payment[]
+  auditLogs           AuditLog[]
+}
+
+model Business {
+  id        String         @id @default(uuid(7)) @db.Uuid
+  name      String
+  sector    BusinessSector
+  city      String?
+  phone     String?
+  email     String?
+  timezone  String         @default("Europe/Madrid")
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  deletedAt DateTime?
+
+  members      BusinessMember[]
+  clients      Client[]
+  services     Service[]
+  appointments Appointment[]
+  payments     Payment[]
+  auditLogs    AuditLog[]
+}
+
+model BusinessMember {
+  id         String             @id @default(uuid(7)) @db.Uuid
+  businessId String             @db.Uuid
+  userId     String             @db.Uuid
+  role       BusinessMemberRole
+  isActive   Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([businessId, userId])
+}
+
+model Client {
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  businessId         String    @db.Uuid
+  name               String
+  phone              String
+  email              String?
+  notes              String?
+  isVip              Boolean   @default(false)
+  vipDiscountPercent Int       @default(0)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  appointments Appointment[]
+  payments     Payment[]
+
+  @@index([businessId, phone])
+}
+
+model Service {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  businessId      String    @db.Uuid
+  name            String
+  description     String?
+  basePrice       Decimal   @db.Decimal(10, 2)
+  durationMinutes Int
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  appointments Appointment[]
+  payments     Payment[]
+
+  @@index([businessId])
+}
+
+model Appointment {
+  id                 String            @id @default(uuid(7)) @db.Uuid
+  businessId         String            @db.Uuid
+  clientId           String            @db.Uuid
+  serviceId          String            @db.Uuid
+  startsAt           DateTime
+  endsAt             DateTime
+  status             AppointmentStatus @default(CONFIRMED)
+  source             AppointmentSource @default(MANUAL)
+  notes              String?
+  createdById        String?           @db.Uuid
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  cancelledAt        DateTime?
+  cancellationReason String?
+  deletedAt          DateTime?
+
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdBy User?    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  payment   Payment?
+
+  @@index([businessId, startsAt])
+  @@index([businessId, clientId])
+  @@index([businessId, status])
+}
+
+model Payment {
+  id                   String        @id @default(uuid(7)) @db.Uuid
+  businessId           String        @db.Uuid
+  clientId             String        @db.Uuid
+  appointmentId        String?       @unique @db.Uuid
+  serviceId            String?       @db.Uuid
+  basePrice            Decimal       @db.Decimal(10, 2)
+  vipDiscountAmount    Decimal       @default(0) @db.Decimal(10, 2)
+  manualDiscountAmount Decimal       @default(0) @db.Decimal(10, 2)
+  finalPrice           Decimal       @db.Decimal(10, 2)
+  paymentMethod        PaymentMethod
+  status               PaymentStatus @default(PAID)
+  paidAt               DateTime?
+  createdById          String?       @db.Uuid
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  markedAsErrorAt      DateTime?
+  errorReason          String?
+
+  business    Business     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  client      Client       @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  appointment Appointment? @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  service     Service?     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  createdBy   User?        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([businessId, paidAt])
+  @@index([businessId, clientId])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  businessId   String?  @db.Uuid
+  userId       String?  @db.Uuid
+  action       String
+  resourceType String
+  resourceId   String?
+  ip           String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, createdAt])
+}
