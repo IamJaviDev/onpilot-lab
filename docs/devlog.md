@@ -46,7 +46,6 @@ lo cerró.
 **Commit.** `docs: track project state in devlog, drop stale Estado actual`
 **Deuda generada.** Ninguna.
 
-
 ### 2026-06-13 — Tarea 4: PrismaModule + PrismaService
 
 **Qué se hizo.** Integración NestJS↔Prisma: PrismaService (extiende PrismaClient, $connect/$disconnect en ciclo de vida) y PrismaModule @Global. Registrado en AppModule. enableShutdownHooks() en main.ts.
