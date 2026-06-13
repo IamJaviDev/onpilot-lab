@@ -32,6 +32,7 @@ lo cerró.
   (`prisma db pull` y el diff de `migrate dev` no los ven). Cualquier cambio sobre
   ellos se edita a mano en una nueva migración. **No declarar en `schema.prisma`.**
   No es un bug, es deuda explícita a recordar. _(Generado en Tarea 2.)_
+  - [ ] **ConfigModule pendiente.** Por ahora el .env se carga con `import 'dotenv/config'` en main.ts (suficiente para una variable). Cuando haya más configuración que gestionar (JWT secrets, etc.), migrar a `@nestjs/config` (ConfigModule). _(Generado en Tarea 4.)_
 
 ---
 
