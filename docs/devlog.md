@@ -38,6 +38,15 @@ lo cerró.
 
 ## Asientos
 
+### 2026-06-13 — Tarea 5: Regla de devlog en CLAUDE.md
+
+**Qué se hizo.** Añadida sección "Devlog" a CLAUDE.md (leer docs/devlog.md al empezar tarea, actualizarlo al cerrar). Eliminada la sección "Estado actual", obsoleta y duplicada con el devlog.
+**Decisiones clave.** El "dónde estamos" vive solo en el devlog; CLAUDE.md se queda con lo permanente (reglas, stack, decisiones cerradas). Evita desincronización.
+**Verificación.** Diff revisado: solo CLAUDE.md, borra Estado actual y añade Devlog.
+**Commit.** `docs: track project state in devlog, drop stale Estado actual`
+**Deuda generada.** Ninguna.
+
+
 ### 2026-06-13 — Tarea 4: PrismaModule + PrismaService
 
 **Qué se hizo.** Integración NestJS↔Prisma: PrismaService (extiende PrismaClient, $connect/$disconnect en ciclo de vida) y PrismaModule @Global. Registrado en AppModule. enableShutdownHooks() en main.ts.
