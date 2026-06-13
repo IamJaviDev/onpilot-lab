@@ -149,12 +149,11 @@ pnpm typecheck
 pnpm build
 pnpm prisma:validate
 pnpm prisma:generate
+pnpm prisma:format
 ```
 
-Migraciones (no hay script aún; usar directo hasta crearlo):
+Migraciones (script `prisma:migrate` → `prisma migrate dev`; pasar el nombre con `--name`):
 
 ```bash
-pnpm --filter api exec prisma migrate dev --name <nombre>
+pnpm prisma:migrate --name <nombre>
 ```
-
-> Pendiente menor: añadir scripts `prisma:format` y `prisma:migrate` al `package.json` raíz cuando toque (cambio a justificar en su propio plan).

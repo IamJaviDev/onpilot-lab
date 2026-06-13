@@ -12,6 +12,8 @@
   "typecheck": "pnpm -r --if-present typecheck",
   "prisma:validate": "pnpm --filter api exec prisma validate",
   "prisma:generate": "pnpm --filter api exec prisma generate",
+  "prisma:migrate": "pnpm --filter api exec prisma migrate dev",
+  "prisma:format": "pnpm --filter api exec prisma format",
   "docker:up": "docker-compose up -d",
   "docker:down": "docker-compose down",
   "docker:logs": "docker-compose logs -f"
