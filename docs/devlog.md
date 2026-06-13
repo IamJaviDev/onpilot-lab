@@ -1,0 +1,135 @@
+# Onpilot — Devlog
+
+Bitácora de desarrollo del proyecto. Cada tarea cerrada deja aquí un asiento breve
+con qué se hizo, las decisiones clave y la deuda que arrastra.
+
+Este archivo es la **memoria del proyecto**: lo que no esté aquí (o en otro archivo
+del repo) no existe para Claude Code en futuras sesiones. El historial de Git cuenta
+*qué* cambió; el devlog cuenta *por qué* y *qué queda pendiente*.
+
+No sustituye al `/review` (ese es el resumen completo en la terminal). Aquí va el
+**destilado**: tras cada `/review` y su commit, se añade un asiento nuevo arriba del
+todo y se actualiza la sección de deuda.
+
+---
+
+## Deuda técnica abierta
+
+Lista viva. Cuando algo se resuelve, se marca y se mueve al asiento de la tarea que
+lo cerró.
+
+- [ ] **Índice redundante de teléfono.** `Client_businessId_phone_idx` (no único,
+  autogenerado del schema) está solapado por el parcial único
+  `Client_businessId_phone_active_idx`. Eliminar el no-único en una futura tarea que
+  toque el schema. _(Generado en Tarea 2.)_
+- [ ] **Scripts de Prisma pendientes.** Añadir `prisma:migrate` y `prisma:format` al
+  `package.json` raíz. Microtarea con su propio commit. _(Generado en Tarea 2.)_
+- [ ] **Inconsistencia entre docs.** `docs/10-development-workflow.md` lista el flujo
+  sin el paso REVISIÓN, mientras `CLAUDE.md` sí lo incluye. Alinear ambos
+  (manda `CLAUDE.md`). Microtarea de documentación. _(Detectado en Tarea 2.)_
+- [ ] **Invariantes invisibles a Prisma.** El índice único parcial de teléfono y los
+  8 CHECK de rango viven solo en el SQL de la migración; Prisma no los introspecta
+  (`prisma db pull` y el diff de `migrate dev` no los ven). Cualquier cambio sobre
+  ellos se edita a mano en una nueva migración. **No declarar en `schema.prisma`.**
+  No es un bug, es deuda explícita a recordar. _(Generado en Tarea 2.)_
+
+---
+
+## Asientos
+
+### 2026-06-13 — Tarea 2: Migración inicial H1 (`init_h1`)
+
+**Qué se hizo.** Primera migración del proyecto, generada desde el schema H1 ya
+comiteado y aplicada a la Postgres local (`onpilot_dev`). Materializa 8 tablas, 7
+enums, FKs `onDelete: RESTRICT` e índices del schema, más un bloque SQL manual al
+final con el índice único parcial de teléfono y 8 CHECK de rango.
+
+**Decisiones clave.**
+- Método `prisma migrate dev --create-only` → edición manual del `migration.sql` →
+  aplicación. Una sola migración.
+- Pausa de verificación entre generar y editar: se confirmaron los nombres reales de
+  tablas/columnas (PascalCase/camelCase entrecomillados) antes de escribir el SQL manual.
+- Índice parcial: `Client_businessId_phone_active_idx`, `UNIQUE ("businessId","phone")
+  WHERE "deletedAt" IS NULL` → teléfono único por negocio solo entre clientes activos.
+- 8 CHECK vía `ALTER TABLE`: `vipDiscountPercent` 0–100; `Service.basePrice >= 0`;
+  `Service.durationMinutes > 0`; los 4 importes de `Payment >= 0`;
+  `Appointment.startsAt < endsAt` (estricto).
+- "No citas en pasado" NO se modela como CHECK (depende de `now()` + timezone del
+  negocio): queda en capa de aplicación.
+- `schema.prisma` intacto.
+
+**Verificación.** `migrate status` → up to date; `prisma:validate` y `prisma:generate`
+OK. Pruebas funcionales en psql (transacción con ROLLBACK, sin persistir): el índice
+parcial bloquea el duplicado activo, permite reutilizar el teléfono tras soft-delete,
+y los CHECK rechazan los valores fuera de rango. Los `Payment_*_nonneg` no se probaron
+con INSERT explícito por ser idénticos en forma al de `Service.basePrice` (sí verificado);
+existen en la migración aplicada.
+
+**Commit.** `feat(api): add initial H1 migration (init_h1)`
+
+**Deuda generada.** Índice redundante de teléfono; scripts `prisma:migrate`/`prisma:format`;
+invariantes manuales invisibles a Prisma. Detectada además la inconsistencia del paso
+REVISIÓN entre docs. (Ver sección de deuda arriba.)
+
+---
+
+### 2026-06-13 — Tarea 1: Schema Prisma H1
+
+**Qué se hizo.** Definición del schema Prisma de las 8 entidades de Fase 1 (H1) en
+`apps/api/prisma/schema.prisma`: `User`, `Business`, `BusinessMember`, `Client`,
+`Service`, `Appointment`, `Payment`, `AuditLog`, con sus 7 enums, relaciones, índices
+y convenciones multi-tenant. Sin migración (diferida a la Tarea 2).
+
+**Decisiones clave.**
+- IDs `uuid(7)` con `@db.Uuid`; fechas en UTC; soft delete (`deletedAt`) solo donde
+  corresponde (NO en `BusinessMember` ni en `Payment`).
+- Dinero en `Decimal(10,2)`; `vipDiscountPercent` como `Int`.
+- `Appointment.status` `@default(CONFIRMED)`; `source` `@default(MANUAL)`.
+- `Payment.appointmentId` nullable y `@unique` → un cobro principal por cita.
+- `Business.timezone` `@default("Europe/Madrid")`.
+- Relaciones con `onDelete: Restrict`; `@@unique([businessId, userId])` en
+  `BusinessMember`; índices compuestos con `businessId` por delante.
+- Nullables confirmados: `Appointment.createdById`, `Payment.paidAt`,
+  `Business.city/phone/email`, `AuditLog.userId/businessId`.
+- Sin `deletedBy` (no inventar campos; el "quién" lo cubre `AuditLog`).
+- Contradicción resuelta: la spec de H1 menciona `ClientNote`, pero manda `CLAUDE.md`
+  / `05-database-model.md` → notas simples en `Client`, sin entidad `ClientNote`. Y se
+  usa `BusinessMember` (que la spec de H1 no mencionaba).
+- Fuera de alcance por decisión: `ToolSubscription` + enum `Tool` (fases posteriores);
+  tabla de refresh tokens (irá con el módulo Auth).
+
+**Verificación.** `prisma:validate` y `prisma:generate` OK. `uuid(7)` validó sin
+problema en Prisma 7.8. No hizo falta tocar el `datasource url`: `prisma.config.ts` ya
+gestiona la conexión.
+
+**Commit.** `feat(api): add H1 Prisma schema (8 entities + enums)` (`3826fcb`)
+
+**Deuda generada.** Diferidos a la Tarea 2 (ya resueltos): índice único parcial de
+teléfono y CHECK de rango.
+
+---
+
+### 2026-06-13 — Tarea 0: Harness de Claude Code
+
+**Qué se hizo.** Montaje del entorno de trabajo asistido por IA: `CLAUDE.md` en la raíz
+(reglas permanentes, stack, multi-tenancy, prohibiciones, decisiones cerradas de H1) y
+slash commands en `.claude/commands/` (`/spec`, `/plan`, `/implement`, `/check`,
+`/review`) que materializan el flujo SPEC → PLAN → APROBACIÓN → IMPLEMENTACIÓN → CHECK →
+REVISIÓN → COMMIT. Los comandos llevan `disable-model-invocation: true` para que solo se
+disparen manualmente.
+
+**Commit.** `chore: add Claude Code harness (CLAUDE.md + workflow commands)`
+
+---
+
+> **Plantilla para nuevos asientos** (copiar arriba del todo, bajo "## Asientos"):
+>
+> ```
+> ### AAAA-MM-DD — Tarea N: <título>
+>
+> **Qué se hizo.** …
+> **Decisiones clave.** …
+> **Verificación.** …
+> **Commit.** …
+> **Deuda generada.** … (y añadir a la sección de deuda de arriba)
+> ```
