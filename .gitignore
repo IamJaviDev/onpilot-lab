@@ -40,6 +40,9 @@ lerna-debug.log*
 !.env.example
 !.env.local.example
 
+# Prisma generated client
+apps/api/src/generated/
+
 # TypeScript
 *.tsbuildinfo
 
@@ -69,7 +72,7 @@ Desktop.ini
 *.swp
 *.swo
 
-# Docker
+# Docker local data
 docker-data/
 postgres-data/
 mysql-data/

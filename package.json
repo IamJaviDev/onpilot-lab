@@ -4,11 +4,18 @@
   "private": true,
   "description": "Onpilot SaaS multi-tenant monorepo",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
-    "build": "pnpm -r build",
-    "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
-  },
+  "dev": "pnpm -r --parallel dev",
+  "dev:web": "pnpm --filter web dev",
+  "dev:api": "pnpm --filter api start:dev",
+  "build": "pnpm -r --if-present build",
+  "lint": "pnpm -r --if-present lint",
+  "typecheck": "pnpm -r --if-present typecheck",
+  "prisma:validate": "pnpm --filter api exec prisma validate",
+  "prisma:generate": "pnpm --filter api exec prisma generate",
+  "docker:up": "docker-compose up -d",
+  "docker:down": "docker-compose down",
+  "docker:logs": "docker-compose logs -f"
+},
   "engines": {
     "node": ">=22"
   },

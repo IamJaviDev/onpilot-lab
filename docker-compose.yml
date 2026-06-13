@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: onpilot_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: onpilot
+      POSTGRES_PASSWORD: onpilot
+      POSTGRES_DB: onpilot_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - onpilot_postgres_data:/var/lib/postgresql
+
+  redis:
+    image: redis:8-alpine
+    container_name: onpilot_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  onpilot_postgres_data:
