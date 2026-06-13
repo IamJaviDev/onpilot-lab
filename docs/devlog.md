@@ -22,8 +22,8 @@ lo cerró.
   autogenerado del schema) está solapado por el parcial único
   `Client_businessId_phone_active_idx`. Eliminar el no-único en una futura tarea que
   toque el schema. _(Generado en Tarea 2.)_
-- [ ] **Scripts de Prisma pendientes.** Añadir `prisma:migrate` y `prisma:format` al
-  `package.json` raíz. Microtarea con su propio commit. _(Generado en Tarea 2.)_
+- [x] **Scripts de Prisma pendientes.** Añadir `prisma:migrate` y `prisma:format` al
+  `package.json` raíz. Microtarea con su propio commit. _(Generado en Tarea 2.)_(Cerrado en Tarea 3.)
 - [ ] **Inconsistencia entre docs.** `docs/10-development-workflow.md` lista el flujo
   sin el paso REVISIÓN, mientras `CLAUDE.md` sí lo incluye. Alinear ambos
   (manda `CLAUDE.md`). Microtarea de documentación. _(Detectado en Tarea 2.)_
@@ -36,6 +36,15 @@ lo cerró.
 ---
 
 ## Asientos
+
+
+### 2026-06-13 — Tarea 3: Scripts de Prisma + nota CLAUDE.md
+
+**Qué se hizo.** Añadidos los scripts `prisma:migrate` (→ `prisma migrate dev`) y `prisma:format` al package.json raíz, siguiendo el patrón de los existentes. Actualizado CLAUDE.md (lista de CHECK + nota de migraciones; eliminada la línea de "pendiente" obsoleta).
+**Decisiones clave.** `prisma:deploy` queda fuera (no hay entorno remoto). `--name` se reenvía por pnpm al invocar.
+**Verificación.** JSON válido; `prisma:format` OK sin tocar el schema; `prisma:migrate --help` resuelve correcto sin aplicar.
+**Commit.** `chore: add prisma:migrate and prisma:format scripts`
+**Deuda generada.** Ninguna. (Cierra deuda previa.)
 
 ### 2026-06-13 — Tarea 2: Migración inicial H1 (`init_h1`)
 
