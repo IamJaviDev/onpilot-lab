@@ -118,11 +118,12 @@ Convenciones de datos: **UUID** como IDs · fechas en **UTC** · **soft delete**
 
 ---
 
-## Estado actual
+## Devlog
 
-- Backend NestJS arranca y responde Hello World. Prisma instalado e inicializado en `apps/api`, pero **el schema aún no tiene modelos reales y no existe ninguna migración**.
-- Funcionan ya: `pnpm prisma:validate`, `pnpm prisma:generate`, lint/typecheck/build de web y api, Postgres y Redis en Docker.
-- No ejecutar `prisma migrate` hasta que el schema haya sido revisado y aprobado.
+`docs/devlog.md` es la memoria viva del proyecto: estado actual y deuda técnica abierta.
+
+- Al **empezar** una tarea: leer el devlog para recuperar contexto y pendientes.
+- Al **cerrar** una tarea (tras el commit): añadir un asiento nuevo arriba y actualizar la sección "Deuda técnica abierta".
 
 ---
 
