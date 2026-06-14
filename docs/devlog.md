@@ -32,11 +32,21 @@ lo cerró.
   (`prisma db pull` y el diff de `migrate dev` no los ven). Cualquier cambio sobre
   ellos se edita a mano en una nueva migración. **No declarar en `schema.prisma`.**
   No es un bug, es deuda explícita a recordar. _(Generado en Tarea 2.)_
-  - [ ] **ConfigModule pendiente.** Por ahora el .env se carga con `import 'dotenv/config'` en main.ts (suficiente para una variable). Cuando haya más configuración que gestionar (JWT secrets, etc.), migrar a `@nestjs/config` (ConfigModule). _(Generado en Tarea 4.)_
+- [ ] **ConfigModule pendiente.** Por ahora el .env se carga con `import 'dotenv/config'` en main.ts (suficiente para una variable). Cuando haya más configuración que gestionar (JWT secrets, etc.), migrar a `@nestjs/config` (ConfigModule). _(Generado en Tarea 4.)_
+- [ ] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro. Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
+- [ ] **AuditLog de login/logout.** La auditoría de sesión se difiere a una tarea de auditoría transversal. _(Generado en Auth-1.)_
 
 ---
 
 ## Asientos
+
+### 2026-06-14 — Tarea 6 (Auth-1): Modelo RefreshToken + migración
+
+**Qué se hizo.** Añadido el modelo RefreshToken al schema (userId, tokenHash @unique, expiresAt, revokedAt, createdAt; back-relation en User) y su migración add_refresh_token (aditiva, sin SQL manual).
+**Decisiones clave.** onDelete: Cascade (desviación justificada de Restrict: el refresh token es artefacto de sesión, no dato de negocio; trazabilidad en AuditLog). Sin businessId (el token es del usuario, no del negocio). Sin deletedAt (el borrado lógico es revokedAt). tokenHash @unique = índice de lookup.
+**Verificación.** migration.sql revisado: solo crea RefreshToken + índices + FK, no toca tablas H1. validate / migrate status / typecheck OK.
+**Commit.** `feat(api): add RefreshToken model and migration`
+**Pendiente / próximo.** Auth-2 introducirá @nestjs/config + Argon2 + emisión JWT (access+refresh). Deuda del bloque Auth: rate limiting (@nestjs/throttler) y AuditLog de login/logout, ambos diferidos.
 
 ### 2026-06-13 — Tarea 5: Regla de devlog en CLAUDE.md
 
