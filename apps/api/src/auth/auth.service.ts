@@ -13,7 +13,9 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import type { CurrentBusinessContext } from './auth-context.types';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterBusinessDto } from './dto/register-business.dto';
 
 const DURATION_PATTERN = /^(\d+)(s|m|h|d)$/;
@@ -144,6 +146,78 @@ export class AuthService {
     };
   }
 
+  async me(userId: string, business: CurrentBusinessContext | null) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true },
+    });
+    if (!user) {
+      throw new UnauthorizedException();
+    }
+    return { user, activeBusiness: business };
+  }
+
+  async refresh(dto: RefreshTokenDto) {
+    const tokenHash = this.hashToken(dto.refreshToken);
+    const record = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
+    });
+
+    // Mismo 401 genérico en cada fallo: no permitir distinguir los casos.
+    if (!record) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    if (record.revokedAt !== null) {
+      // Reuso de un refresh ya revocado: revoca todos los activos del usuario.
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: record.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    if (record.expiresAt <= new Date()) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: record.userId },
+    });
+    if (!user || !user.isActive || user.deletedAt !== null) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    // Rotación atómica: revoca el viejo (solo si seguía activo) y crea el nuevo
+    // en una transacción. Si el revoke afecta 0 filas, otro request lo rotó
+    // primero (o es reuso concurrente) → 401, sin emitir token nuevo.
+    const { rawToken, data } = this.buildRefreshToken(user.id);
+    await this.prisma.$transaction(async (tx) => {
+      const revoked = await tx.refreshToken.updateMany({
+        where: { id: record.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      if (revoked.count !== 1) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+      await tx.refreshToken.create({ data });
+    });
+
+    const accessToken = await this.jwt.signAsync({
+      sub: user.id,
+      email: user.email,
+      globalRole: user.globalRole,
+    });
+    return { accessToken, refreshToken: rawToken };
+  }
+
+  async logout(dto: RefreshTokenDto): Promise<void> {
+    const tokenHash = this.hashToken(dto.refreshToken);
+    // Idempotente: no distingue si el token existía o ya estaba revocado.
+    await this.prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   private async issueTokens(user: TokenUser) {
     const accessToken = await this.jwt.signAsync({
       sub: user.id,
@@ -155,19 +229,24 @@ export class AuthService {
   }
 
   private async createRefreshToken(userId: string): Promise<string> {
+    const { rawToken, data } = this.buildRefreshToken(userId);
+    await this.prisma.refreshToken.create({ data });
+    return rawToken;
+  }
+
+  private buildRefreshToken(userId: string): {
+    rawToken: string;
+    data: { userId: string; tokenHash: string; expiresAt: Date };
+  } {
     const rawToken = randomBytes(32).toString('hex');
     const tokenHash = this.hashToken(rawToken);
     const ttlMs = parseDurationMs(
       this.config.getOrThrow<string>('REFRESH_TOKEN_TTL'),
     );
-    await this.prisma.refreshToken.create({
-      data: {
-        userId,
-        tokenHash,
-        expiresAt: new Date(Date.now() + ttlMs),
-      },
-    });
-    return rawToken;
+    return {
+      rawToken,
+      data: { userId, tokenHash, expiresAt: new Date(Date.now() + ttlMs) },
+    };
   }
 
   private hashToken(rawToken: string): string {
