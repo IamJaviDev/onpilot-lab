@@ -23,7 +23,7 @@ lo cerró.
   `Client_businessId_phone_active_idx`. Eliminar el no-único en una futura tarea que
   toque el schema. _(Generado en Tarea 2.)_
 - [x] **Scripts de Prisma pendientes.** Añadir `prisma:migrate` y `prisma:format` al
-  `package.json` raíz. Microtarea con su propio commit. _(Generado en Tarea 2.)_(Cerrado en Tarea 3.)
+  `package.json` raíz. Microtarea con su propio commit. _(Generado en Tarea 2. Cerrado en Tarea 3.)_
 - [ ] **Inconsistencia entre docs.** `docs/10-development-workflow.md` lista el flujo
   sin el paso REVISIÓN, mientras `CLAUDE.md` sí lo incluye. Alinear ambos
   (manda `CLAUDE.md`). Microtarea de documentación. _(Detectado en Tarea 2.)_
@@ -32,13 +32,33 @@ lo cerró.
   (`prisma db pull` y el diff de `migrate dev` no los ven). Cualquier cambio sobre
   ellos se edita a mano en una nueva migración. **No declarar en `schema.prisma`.**
   No es un bug, es deuda explícita a recordar. _(Generado en Tarea 2.)_
-- [ ] **ConfigModule pendiente.** Por ahora el .env se carga con `import 'dotenv/config'` en main.ts (suficiente para una variable). Cuando haya más configuración que gestionar (JWT secrets, etc.), migrar a `@nestjs/config` (ConfigModule). _(Generado en Tarea 4.)_
+- [x] **ConfigModule pendiente.** Por ahora el .env se carga con `import 'dotenv/config'` en main.ts (suficiente para una variable). Cuando haya más configuración que gestionar (JWT secrets, etc.), migrar a `@nestjs/config` (ConfigModule). _(Generado en Tarea 4. Cerrado en Auth-2.)_
 - [ ] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro. Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
 - [ ] **AuditLog de login/logout.** La auditoría de sesión se difiere a una tarea de auditoría transversal. _(Generado en Auth-1.)_
 
 ---
 
 ## Asientos
+
+### 2026-06-14 — Auth-2: AuthModule core (config, register-business, login)
+
+**Qué se hizo.** Introducido @nestjs/config (ConfigModule global + validate que corta el arranque si falta un secret). Implementados POST /api/auth/register-business (transaccional) y POST /api/auth/login, con hash Argon2id de password y emisión de access JWT + refresh token opaco persistido hasheado. Prefijo global /api y ValidationPipe (whitelist) en main.ts.
+
+**Decisiones clave.**
+- Refresh token: string opaco aleatorio (crypto.randomBytes 32), NO JWT; se persiste su SHA-256 en RefreshToken.tokenHash (determinista, para lookup en Auth-3). Argon2 solo para passwords. Sin REFRESH_TOKEN_SECRET (no se firma nada).
+- Access token: claims mínimos (sub, email, globalRole), sin businessId (se resolverá en el guard de Auth-3).
+- register-business: hash fuera de la transacción; $transaction crea User+Business+BusinessMember(BUSINESS_OWNER); businessId asignado por backend; email duplicado (P2002) → 409.
+- login: error genérico "Invalid credentials" (no revela si falla email o password); solo usuarios isActive.
+- Password @MinLength(10), sin reglas de complejidad. ValidationPipe whitelist:true como defensa anti-businessId colado.
+- ConfigModule sustituye dotenv/config en runtime; prisma.config.ts mantiene dotenv para la CLI.
+
+**Verificación (server real + curl + psql).** register → 201 + tokens; login correcto → 200 + businesses[]; login incorrecto → 401 genérico; email duplicado → 409. En BD: passwordHash = $argon2id$…; RefreshToken con tokenHash SHA-256 ≠ token en claro. Arranque conecta a Postgres sin P1012 tras quitar dotenv/config. lint/typecheck/build OK.
+
+**Desviaciones (todas necesarias).** (1) argon2 es módulo nativo → habilitado en pnpm-workspace.yaml allowBuilds. (2) Cliente Prisma no se había regenerado tras Auth-1 → prisma:generate para materializar el delegate refreshToken. (3) Cast de expiresIn a JwtSignOptions['expiresIn']. (4) Reconciliado .env.example (nombres nuevos, eliminado REFRESH_TOKEN_SECRET).
+
+**Commit.** `feat(api): add ConfigModule and Auth core (register-business, login)`
+
+**Pendiente / próximo.** Auth-3: JwtAuthGuard + resolución currentUser/currentBusiness + endpoints me/refresh/logout. Deuda del bloque aún abierta: rate limiting, AuditLog de login/logout.
 
 ### 2026-06-14 — Tarea 6 (Auth-1): Modelo RefreshToken + migración
 
