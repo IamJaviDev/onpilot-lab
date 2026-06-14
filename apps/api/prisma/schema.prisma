@@ -85,6 +85,7 @@ model User {
   createdAppointments Appointment[]
   createdPayments     Payment[]
   auditLogs           AuditLog[]
+  refreshTokens       RefreshToken[]
 }
 
 model Business {
@@ -235,4 +236,17 @@ model AuditLog {
   user     User?     @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([businessId, createdAt])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
