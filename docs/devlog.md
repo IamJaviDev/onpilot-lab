@@ -35,10 +35,31 @@ lo cerró.
 - [x] **ConfigModule pendiente.** Por ahora el .env se carga con `import 'dotenv/config'` en main.ts (suficiente para una variable). Cuando haya más configuración que gestionar (JWT secrets, etc.), migrar a `@nestjs/config` (ConfigModule). _(Generado en Tarea 4. Cerrado en Auth-2.)_
 - [ ] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro. Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
 - [ ] **AuditLog de login/logout.** La auditoría de sesión se difiere a una tarea de auditoría transversal. _(Generado en Auth-1.)_
+- [ ] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit), historial de citas/cobros y tags por actividad (REACTIVATE/REGULAR). Depende de Appointments y Payments. _(Generado en Clients.)_
+- [ ] **AuditLog de clientes.** Auditar create/edit/VIP/delete. Se difiere a la tarea de auditoría transversal (junto con el de login/logout). _(Generado en Clients.)_
+- [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
 
 ---
 
 ## Asientos
+
+### 2026-06-14 — Clients: CRUD + VIP + soft delete + búsqueda
+
+**Qué se hizo.** Primer recurso operativo de H1. ClientsModule con 6 endpoints (list con search/paginación, create, getOne, update, updateVip, soft delete), todos bajo JwtAuthGuard y filtrados por @BusinessId() (nuevo decorator: currentBusiness null → 403). Primer uso real del multi-tenancy con código.
+
+**Decisiones clave.**
+- Multi-tenancy en cada operación: findFirst/updateMany siempre con {id, businessId, deletedAt:null}; count===0 → 404 genérico (no revela existencia en otro negocio).
+- Teléfono duplicado activo: captura P2002 → 409 (sin pre-check, evita race). Reutilizable tras soft delete (índice parcial).
+- Tags triviales (VIP/NEW) ahora; ficha enriquecida diferida (depende de Appointments/Payments).
+- Nuevo decorator @BusinessId() reutilizable por todos los recursos H1.
+
+**Desviación.** Hubo que exportar JwtModule desde AuthModule (no bastaba exportar el guard) para que JwtService se inyecte en ClientsModule. Cambio mínimo en Auth, necesario para reutilizar el guard en recursos H1.
+
+**Verificación (server real + curl + psql).** AISLAMIENTO A↔B confirmado: B → 404 en GET/PATCH/DELETE de cliente de A; listado de B vacío. CRUD completo, 401 sin token, 403 admin sin negocio, 409 teléfono duplicado, 204 soft delete + recrear, VIP 0–100 (150 → 400), ParseUUIDPipe acepta v7. lint/typecheck/build OK. Data limpiada.
+
+**Commit.** `feat(api): add Clients module (CRUD, VIP, soft delete, search)`
+
+**Deuda generada.** Ficha enriquecida de cliente (stats/historial/tags por actividad) hasta Appointments/Payments; AuditLog de clientes; RolesGuard (necesario cuando exista gestión de staff).
 
 ### 2026-06-14 — Auth-3: JwtAuthGuard + currentUser/currentBusiness + me/refresh/logout
 
