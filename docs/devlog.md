@@ -27,21 +27,57 @@ lo cerró.
 - [ ] **Inconsistencia entre docs.** `docs/10-development-workflow.md` lista el flujo
   sin el paso REVISIÓN, mientras `CLAUDE.md` sí lo incluye. Alinear ambos
   (manda `CLAUDE.md`). Microtarea de documentación. _(Detectado en Tarea 2.)_
-- [ ] **Invariantes invisibles a Prisma.** El índice único parcial de teléfono y los
-  8 CHECK de rango viven solo en el SQL de la migración; Prisma no los introspecta
-  (`prisma db pull` y el diff de `migrate dev` no los ven). Cualquier cambio sobre
-  ellos se edita a mano en una nueva migración. **No declarar en `schema.prisma`.**
-  No es un bug, es deuda explícita a recordar. _(Generado en Tarea 2.)_
-- [x] **ConfigModule pendiente.** Por ahora el .env se carga con `import 'dotenv/config'` en main.ts (suficiente para una variable). Cuando haya más configuración que gestionar (JWT secrets, etc.), migrar a `@nestjs/config` (ConfigModule). _(Generado en Tarea 4. Cerrado en Auth-2.)_
-- [ ] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro. Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
-- [ ] **AuditLog de login/logout.** La auditoría de sesión se difiere a una tarea de auditoría transversal. _(Generado en Auth-1.)_
-- [ ] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit), historial de citas/cobros y tags por actividad (REACTIVATE/REGULAR). Depende de Appointments y Payments. _(Generado en Clients.)_
-- [ ] **AuditLog de clientes.** Auditar create/edit/VIP/delete. Se difiere a la tarea de auditoría transversal (junto con el de login/logout). _(Generado en Clients.)_
-- [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
+- [x] **ConfigModule pendiente.** Migrar de `import 'dotenv/config'` a `@nestjs/config`
+  (ConfigModule) cuando haya más configuración que gestionar. _(Generado en Tarea 4. Cerrado en Auth-2.)_
+- [ ] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro.
+  Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
+- [ ] **AuditLog transversal.** Auditar acciones según 08-security: login/logout
+  _(Auth-1)_, create/edit/VIP/delete de clientes _(Clients)_, create/edit de servicios
+  _(Services)_, create/edit/cancel/no-show de citas _(Appointments)_. Se difiere todo a
+  una única tarea de auditoría transversal; al hacerla se cierran las cuatro de golpe.
+- [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando
+  exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
+- [ ] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit),
+  historial de citas/cobros y tags por actividad (REACTIVATE/REGULAR). Ya hay
+  Appointments; falta Payments para que sea accionable del todo. _(Generado en Clients.)_
+- [ ] **Bloqueo de soft-delete de servicio con citas.** No permitir borrar un servicio
+  que tenga citas asociadas. Ya existe Appointments → accionable. _(Generado en Services.)_
+- [ ] **Race teórica de solapamiento de citas.** El check+insert va en `$transaction`
+  pero sin constraint de exclusión de Postgres (btree_gist). Para MVP es teórica; si se
+  vuelve real, añadir el constraint vía migración SQL. _(Generado en Appointments.)_
+
+## Convenciones / Notas permanentes
+
+No son deuda (no se cierran); son recordatorios vivos del proyecto.
+
+- **Invariantes invisibles a Prisma.** El índice único parcial de teléfono y los 8 CHECK
+  de rango viven solo en el SQL de la migración; Prisma no los introspecta (`prisma db pull`
+  y el diff de `migrate dev` no los ven). Cualquier cambio sobre ellos se edita a mano en
+  una nueva migración. **No declarar en `schema.prisma`.** _(Tarea 2.)_
+- **Convención monetaria (regla de oro).** El dinero se calcula SIEMPRE en backend con
+  Decimal; el `number` que sale en las respuestas de la API es solo para display, jamás
+  para recalcular. Clave para Payments. _(Services.)_
 
 ---
 
 ## Asientos
+
+### 2026-06-16 — Appointments: CRUD + cancel + no-show + validaciones
+
+**Qué se hizo.** Tercer recurso H1, el primero con lógica de negocio compleja. AppointmentsModule (6 endpoints: list con filtros from/to/status/clientId, create, getOne, update, cancel, no-show). endsAt calculado en backend desde service.durationMinutes; status default CONFIRMED, source MANUAL fijado en backend, createdById del @CurrentUser().
+
+**Decisiones clave.**
+- Formato de startsAt: ISO-8601 con offset de zona OBLIGATORIO (@Matches exige Z o ±HH:MM, porque @IsISO8601 acepta cadenas sin zona). Solo así la comparación no-pasado en UTC es inequívoca. Documentado: si el frontend pasa a enviar hora local, entrará Business.timezone.
+- Pertenencia multi-tenant (novedad): client y service validados con findFirst {id, businessId, deletedAt:null}; service además isActive:true. Ajeno/inexistente/inactivo → 400.
+- Solapamiento: bloquea contra citas SCHEDULED/CONFIRMED por intersección estricta (startsAt < otherEnds && endsAt > otherStarts); adyacente exacto permitido; CANCELLED/NO_SHOW NO bloquean. 409. Check+insert en $transaction.
+- Estados terminales (COMPLETED/CANCELLED/NO_SHOW) no editables ni cancelables → 409. clientId inmutable en PATCH.
+- PATCH de solo-hora no revalida isActive del servicio ya vinculado (intencional, anotado en código).
+
+**Verificación (server real + curl + psql).** Todos los casos: 400 fecha sin offset / pasado / client ajeno / service ajeno-inactivo-borrado; 201 con endsAt=+30min/CONFIRMED/MANUAL; 409 solapamiento (adyacente permitido); CANCELLED/NO_SHOW no bloquean; 409 terminal; PATCH recalcula endsAt; from/to filtran; aislamiento A↔B 404; 401 sin token. En BD: 4 citas negocio A, endsAt correcto, source MANUAL, createdById presente. lint/typecheck/build OK. Data limpiada.
+
+**Commit.** `feat(api): add Appointments module (CRUD, cancel, no-show, overlap & tenancy validation)`
+
+**Deuda generada.** Race teórica de solapamiento (check+insert en transacción pero sin constraint exclusión Postgres btree_gist; si se vuelve real, migración). AuditLog de citas. startsAt offset-obligatorio (camino a Business.timezone cuando llegue hora local).
 
 ### 2026-06-16 — Services: CRUD + activar/desactivar + soft delete
 
