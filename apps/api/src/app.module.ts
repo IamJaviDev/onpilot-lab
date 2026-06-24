@@ -5,6 +5,7 @@ import { AppService } from './app.service';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { AuthModule } from './auth/auth.module';
 import { ClientsModule } from './clients/clients.module';
+import { PaymentsModule } from './payments/payments.module';
 import { ServicesModule } from './services/services.module';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
@@ -17,6 +18,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ClientsModule,
     ServicesModule,
     AppointmentsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
