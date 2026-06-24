@@ -64,7 +64,23 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
-### 2026-06-XX — Payments: cobro con descuento VIP, atomicidad y multi-tenancy
+### 2026-06-24 — Cash: cierre de caja básico
+
+**Qué se hizo.** Séptimo recurso H1, de solo lectura. CashModule con GET /cash/summary?from&to que agrega los cobros del negocio en un rango sobre paidAt, vía agregaciones nativas de Prisma (aggregate/groupBy). Devuelve totalRevenue, paymentsCount, averageTicket, byPaymentMethod[], topServices[] (top 5) y errorsCount.
+
+**Decisiones clave.**
+- Solo cobros PAID suman; los ERROR se reportan aparte en errorsCount (no inflan la caja). REFUNDED ignorado en MVP.
+- Todo en Prisma.Decimal; number solo display. averageTicket con guard de división por cero (0 cobros → 0).
+- from/to OBLIGATORIOS (400 si faltan), ISO-8601 con offset de zona (consistente con Appointments). from>to → 400.
+- topServices: una lista ordenada por facturación, top 5; cobros sin serviceId omitidos de topServices pero contados en total/byPaymentMethod. Servicio borrado conserva su nombre (caja histórica).
+
+**Verificación (server real + curl + psql).** total 240.00/5 cuadrado exacto contra psql; averageTicket 48; byPaymentMethod ordenado; ERROR en errorsCount sin inflar total; sin-servicio en total pero fuera de topServices; servicio borrado conserva nombre; fuera de rango excluido; rango vacío→0 sin división por cero; aislamiento A↔B; 400 fecha sin offset/falta/from>to; 401 sin token. lint/typecheck/build OK. Data limpiada.
+
+**Commit.** `feat(api): add Cash module (cash closing summary over payments)`
+
+**Deuda generada.** Ninguna.
+
+### 2026-06-24 — Payments: cobro con descuento VIP, atomicidad y multi-tenancy
 
 **Qué se hizo.** Sexto recurso H1 y la pieza del dinero. PaymentsModule (POST create, GET list, GET :id, PATCH :id/mark-error). El backend calcula basePrice (del servicio), vipDiscountAmount, finalPrice; status PAID, paidAt y createdById fijados en backend. Si hay appointmentId, marca la cita COMPLETED en la misma transacción.
 
