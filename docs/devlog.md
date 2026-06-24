@@ -33,18 +33,22 @@ lo cerró.
   Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
 - [ ] **AuditLog transversal.** Auditar acciones según 08-security: login/logout
   _(Auth-1)_, create/edit/VIP/delete de clientes _(Clients)_, create/edit de servicios
-  _(Services)_, create/edit/cancel/no-show de citas _(Appointments)_. Se difiere todo a
-  una única tarea de auditoría transversal; al hacerla se cierran las cuatro de golpe.
+  _(Services)_, create/edit/cancel/no-show de citas _(Appointments)_, create y mark-error
+  de cobros _(Payments)_. Se difiere todo a una única tarea de auditoría transversal; al
+  hacerla se cierran todas de golpe.
 - [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando
   exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
 - [ ] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit),
-  historial de citas/cobros y tags por actividad (REACTIVATE/REGULAR). Ya hay
-  Appointments; falta Payments para que sea accionable del todo. _(Generado en Clients.)_
+  historial de citas/cobros y tags por actividad (REACTIVATE/REGULAR). Ya existen
+  Appointments y Payments → plenamente accionable. _(Generado en Clients.)_
 - [ ] **Bloqueo de soft-delete de servicio con citas.** No permitir borrar un servicio
   que tenga citas asociadas. Ya existe Appointments → accionable. _(Generado en Services.)_
 - [ ] **Race teórica de solapamiento de citas.** El check+insert va en `$transaction`
   pero sin constraint de exclusión de Postgres (btree_gist). Para MVP es teórica; si se
   vuelve real, añadir el constraint vía migración SQL. _(Generado en Appointments.)_
+- [ ] **Cobro de importe libre sin servicio.** No soportado en MVP: todo cobro exige un
+  servicio (de la cita o explícito) como origen del basePrice. Si se necesita cobrar un
+  importe arbitrario sin servicio, decisión de producto futura. _(Generado en Payments.)_
 
 ## Convenciones / Notas permanentes
 
@@ -56,11 +60,28 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
   una nueva migración. **No declarar en `schema.prisma`.** _(Tarea 2.)_
 - **Convención monetaria (regla de oro).** El dinero se calcula SIEMPRE en backend con
   Decimal; el `number` que sale en las respuestas de la API es solo para display, jamás
-  para recalcular. Clave para Payments. _(Services.)_
-
----
+  para recalcular. _(Services.)_
 
 ## Asientos
+
+### 2026-06-XX — Payments: cobro con descuento VIP, atomicidad y multi-tenancy
+
+**Qué se hizo.** Sexto recurso H1 y la pieza del dinero. PaymentsModule (POST create, GET list, GET :id, PATCH :id/mark-error). El backend calcula basePrice (del servicio), vipDiscountAmount, finalPrice; status PAID, paidAt y createdById fijados en backend. Si hay appointmentId, marca la cita COMPLETED en la misma transacción.
+
+**Decisiones clave.**
+- Cálculo monetario 100% en Prisma.Decimal (.mul/.div/.sub + toDecimalPlaces(2, ROUND_HALF_UP) en el VIP); el number de la respuesta es solo display (regla de oro). Nunca se acepta basePrice/finalPrice del frontend.
+- basePrice: del servicio de la cita si hay appointmentId; serviceId explícito para cobro manual; sin servicio → 400 (cobro de importe libre no soportado en MVP).
+- finalPrice ≥ 0 obligatorio (descuentos que lo dejan negativo → 400, no se capa a 0).
+- Atomicidad: create payment + cita→COMPLETED en $transaction; el updateMany de la cita exige status IN [SCHEDULED,CONFIRMED] y count===1, si no revierte (cubre race con cancelación).
+- Un cobro por cita: el 409 lo dispara primero el guard de estado terminal (cita COMPLETED tras el 1er cobro); el @unique(appointmentId) queda como backstop de la race teórica.
+- Coherencia client/service del DTO con la cita validada. mark-error no revierte el estado de la cita (MVP). Servicio inactivo no revalidado (coherente con Appointments).
+- Listado sin paginación, orden paidAt desc.
+
+**Verificación (server real + curl + psql).** Cobro VIP base 45 / vip 4.50 / final 40.50 EXACTO en BD (Decimal, sin floats). Cita→COMPLETED atómico. finalPrice<0→400, 2º cobro→409, incoherencias→400, mark-error→ERROR sin revertir cita, aislamiento A↔B→404, 401 sin token, cobro manual sin cita OK, sin servicio→400. Los rechazados NO dejaron fila (atomicidad confirmada). lint/typecheck/build OK. Data limpiada.
+
+**Commit.** `feat(api): add Payments module (charge with VIP discount, tenancy & atomic completion)`
+
+**Deuda generada.** AuditLog de cobros (create, mark-error) → suma a la deuda transversal. Cobro de importe libre sin servicio no soportado (MVP).
 
 ### 2026-06-16 — Appointments: CRUD + cancel + no-show + validaciones
 
