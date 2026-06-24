@@ -64,6 +64,22 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-06-24 — Dashboard H1: KPIs con timezone, conteo de reactivación
+
+**Qué se hizo.** Octavo recurso H1, de solo lectura. DashboardModule con GET /dashboard/h1: 8 KPIs del negocio (todayAppointments, upcomingAppointments, todayRevenue, monthRevenue, newClientsThisMonth, averageTicket, topServices, clientsToReactivate).
+
+**Decisiones clave.**
+- PRIMER consumidor real de Business.timezone. Añadido luxon: los límites "hoy"/"mes" se calculan en la zona del negocio (DST correcto) y se convierten a UTC para las queries.
+- clientsToReactivate vía $queryRaw PARAMETRIZADO (Prisma no expresa bien la condición compuesta: ≥2 COMPLETED ∧ última COMPLETED < hoy−60d ∧ NOT EXISTS cita futura activa, no VIP, no borrado). Cada subquery filtra por businessId. Es un conteo, no una lista (sin datos personales).
+- Dinero en Decimal; averageTicket del mes con guard de 0. topServices forma de Cash (sin refactorizar). period/from/to ignorados (todo desde "ahora" del negocio).
+- REACTIVATE_DAYS=60 comentada en código.
+
+**Verificación (server real + curl + psql).** KPIs cuadrados contra datos deterministas. AISLAMIENTO del $queryRaw A↔B (A=1, B=2, sin cruce) + las 4 condiciones de reactivación con variantes que fallan cada una + no cuenta borrados. TIMEZONE/DST: cobro 00:30 local cuenta hoy, 23:30 del día previo local no. 401 sin token. lint/typecheck/build OK. Data limpiada.
+
+**Commit.** `feat(api): add Dashboard H1 module (timezone-aware KPIs, reactivation count)`
+
+**Deuda generada.** clientsToReactivate vía $queryRaw (revisar índice si crece). Duplicación de la agregación mensual con Cash (posible helper común a futuro). Helper de límites tz con luxon vive en el servicio (extraíble si otro módulo lo necesita).
+
 ### 2026-06-24 — Cash: cierre de caja básico
 
 **Qué se hizo.** Séptimo recurso H1, de solo lectura. CashModule con GET /cash/summary?from&to que agrega los cobros del negocio en un rango sobre paidAt, vía agregaciones nativas de Prisma (aggregate/groupBy). Devuelve totalRevenue, paymentsCount, averageTicket, byPaymentMethod[], topServices[] (top 5) y errorsCount.
