@@ -18,6 +18,15 @@ todo y se actualiza la sección de deuda.
 Lista viva. Cuando algo se resuelve, se marca y se mueve al asiento de la tarea que
 lo cerró.
 
+- [ ] **CSRF token en Auth.** El refresh token va en cookie httpOnly con `sameSite:'strict'`,
+  que es mitigación suficiente para MVP. Si en el futuro se relaja a `lax`/`none` (p. ej. por
+  necesidades cross-site), hay que añadir un token CSRF explícito. _(Generado en frontend-auth.)_
+- [ ] **Logout en móvil (placement visual).** El shell coloca negocio + logout en una topbar
+  compacta en móvil; el placement exacto está pendiente de validación visual fina contra el
+  mockup. _(Generado en frontend layout + navegación.)_
+- [ ] **Edición de notas de cliente sin autosave.** Las notas se editan vía el modal de
+  edición, no con autosave inline como el mockup. Decisión de scope; revisar si se quiere
+  autosave más adelante. _(Generado en frontend Clientes.)_
 - [ ] **Índice redundante de teléfono.** `Client_businessId_phone_idx` (no único,
   autogenerado del schema) está solapado por el parcial único
   `Client_businessId_phone_active_idx`. Eliminar el no-único en una futura tarea que
@@ -63,6 +72,24 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
   para recalcular. _(Services.)_
 
 ## Asientos
+
+### 2026-06-27 — frontend Clientes básica + TanStack Query
+
+**Qué se hizo.** Tercera pieza de frontend y PRIMERA pantalla de datos. Pantalla Clientes contra la API real: listado con búsqueda (debounce 300ms) y paginación, crear/editar (modal con ClientForm reutilizable), toggle VIP + %, borrado soft con confirmación, y ficha /clientes/[id] con los datos que el backend da hoy. Introducido TanStack Query como capa de datos del frontend.
+
+**Decisiones clave.**
+- Ficha BÁSICA: solo datos del cliente (nombre, teléfono, email, notas, VIP+%, "cliente desde", tags). Las secciones de stats/historial/próximas citas del mockup → bloque "Próximamente" (requieren endpoint nuevo; ficha enriquecida será otra tarea).
+- TanStack Query sobre api-client (apiRequest con Bearer + refresh single-flight); no se reinventa el fetch. Query keys centralizadas (clientKeys), invalidación de clientKeys.all tras cada mutación. Provider acotado al layout de (app).
+- Retry de TanStack configurado para NO reintentar 4xx (el 401 lo gestiona api-client; 404/409 son definitivos); solo reintenta errores de red. No compite con el refresh.
+- vip-toggle: una sola mutación, controles bloqueados mientras isPending, % resincronizado por render-pattern (sin useEffect en cascada).
+- Primitivas de formulario PROMOVIDAS de components/auth/ui.tsx a components/ui/form.tsx (las usan login/registro + clientes). Extraído client-bits.tsx (avatar+chip) para no duplicar entre lista y ficha.
+- Ruta /clientes/[id] (lista → ficha, página propia). Slugs español. Modal para alta/edición. 409 de teléfono → error en el campo phone.
+
+**Verificación.** lint/typecheck/build en verde (login/registro siguen OK tras mover ui.tsx). Manual (navegador): listado (vacío/con datos/búsqueda/paginación); crear → aparece sin recargar (invalidación); editar/VIP/borrar con confirmación; ficha con datos + "Próximamente"; teléfono duplicado → error en campo. Sin levantar servidores en el CHECK automatizado.
+
+**Commit.** `feat(web): pantalla Clientes básica (lista, ficha, CRUD, VIP) con TanStack Query`
+
+**Deuda generada.** Ficha enriquecida (stats/gasto/historial/próximas citas) pendiente — requiere endpoint backend que agregue datos del cliente (cierra también la deuda vieja de "ficha enriquecida"). Edición de notas via modal, no autosave (decisión de scope).
 
 ### 2026-06-27 — frontend layout + navegación: carcasa H1
 
