@@ -64,6 +64,22 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-06-27 — frontend-auth: cookie httpOnly + cimientos de auth en web
+
+**Qué se hizo.** Primera tarea de frontend (apps/web, Next.js 16) + reapertura acotada del backend de auth. Cimientos de autenticación en cliente y pantallas de login y registro de negocio.
+
+BACKEND (acotado): el refresh token pasa a viajar en cookie httpOnly (antes en el body). login/register-business setean la cookie y devuelven solo el access en el body; refresh lee la cookie, rota y setea la nueva; logout limpia la cookie. Añadido cookie-parser y helper auth.cookies.ts (flags: httpOnly, secure en prod, sameSite 'strict', path '/api/auth', maxAge 7d). La rotación y la detección de reuso de Auth-3 se mantienen intactas (verificado). Eliminado refresh-token.dto.ts (refresh/logout ya no usan body).
+
+FRONTEND: access token solo en memoria (token-store), nunca en localStorage. api-client.ts: wrapper de fetch con credentials:'include', añade Bearer, y ante 401 hace refresh single-flight + reintento. session-context: bootstrap al montar (llama /refresh, la cookie viaja sola, recupera access + /me) — guardado con useRef para no duplicar en StrictMode. Rutas protegidas client-side. Login + registro con React Hook Form + Zod. DM Sans global, tokens de marca. Front→API vía rewrites de Next (mismo origen, sin CORS).
+
+**Decisiones clave.** Cookie httpOnly (no localStorage) por seguridad ante XSS y para sobrevivir al F5. Rewrites de Next en vez de CORS. Zod + RHF + Context propio (sin TanStack Query ni Zustand todavía).
+
+**Verificación.** Automatizado: typecheck/lint/build (api+web). Backend (curl+psql): login/register setean cookie sin refresh en body; refresh rota; reuso de cookie revocada → 401 + revoca familia; logout limpia cookie. Single-flight: 3 refrescos secuenciales sin falsas revocaciones. Visual (navegador): registro→home; F5 mantiene sesión; logout→login + cookie borrada + F5 no recupera; login bueno entra/malo error genérico; DevTools confirma onpilot_rt HttpOnly+Strict+path /api/auth y localStorage sin tokens.
+
+**Commit.** `feat(auth): refresh token en cookie httpOnly + cimientos de auth en web`
+
+**Deuda generada.** CSRF token explícito si en el futuro se relaja sameSite a lax/none (ahora sameSite:strict es mitigación suficiente). Cosmético: el 401 esperado de /refresh tras logout/sin-sesión aparece como error en consola; se puede silenciar (no funcional).
+
 ### 2026-06-24 — Dashboard H1: KPIs con timezone, conteo de reactivación
 
 **Qué se hizo.** Octavo recurso H1, de solo lectura. DashboardModule con GET /dashboard/h1: 8 KPIs del negocio (todayAppointments, upcomingAppointments, todayRevenue, monthRevenue, newClientsThisMonth, averageTicket, topServices, clientsToReactivate).
