@@ -15,7 +15,6 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import type { CurrentBusinessContext } from './auth-context.types';
 import { LoginDto } from './dto/login.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterBusinessDto } from './dto/register-business.dto';
 
 const DURATION_PATTERN = /^(\d+)(s|m|h|d)$/;
@@ -157,8 +156,8 @@ export class AuthService {
     return { user, activeBusiness: business };
   }
 
-  async refresh(dto: RefreshTokenDto) {
-    const tokenHash = this.hashToken(dto.refreshToken);
+  async refresh(rawRefreshToken: string) {
+    const tokenHash = this.hashToken(rawRefreshToken);
     const record = await this.prisma.refreshToken.findUnique({
       where: { tokenHash },
     });
@@ -209,8 +208,12 @@ export class AuthService {
     return { accessToken, refreshToken: rawToken };
   }
 
-  async logout(dto: RefreshTokenDto): Promise<void> {
-    const tokenHash = this.hashToken(dto.refreshToken);
+  async logout(rawRefreshToken: string | undefined): Promise<void> {
+    // Sin cookie no hay nada que revocar: logout idempotente.
+    if (!rawRefreshToken) {
+      return;
+    }
+    const tokenHash = this.hashToken(rawRefreshToken);
     // Idempotente: no distingue si el token existía o ya estaba revocado.
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash, revokedAt: null },
