@@ -64,7 +64,25 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
-### 2026-06-27 — frontend-auth: cookie httpOnly + cimientos de auth en web
+### 2026-06-27 — frontend layout + navegación: carcasa H1
+
+**Qué se hizo.** Segunda pieza de frontend: la carcasa (shell) de la zona protegida con navegación persistente entre las secciones de H1 (Agenda, Clientes, Caja). Tabs superiores en desktop + bottom-nav en móvil, marca de sección activa por ruta, nombre del negocio y logout integrados. Páginas placeholder por sección. Sin pantallas de datos ni llamadas a la API.
+
+**Decisiones clave.**
+- Navegación según el MOCKUP real (docs/mockups/onpilot_agenda.html): tabs en desktop + bottom-nav en móvil. Se descartó el rail/sidebar izquierdo (el d-sidebar del mockup era la lista de clientes, contenido de pantalla, no navegación; con 3 secciones un rail es excesivo).
+- Slugs en español: /agenda, /clientes, /caja. / → redirect a /agenda. (Las llamadas a la API siguen siendo /api/clients etc.)
+- lucide-react para iconos (Calendar, Users, BarChart3, LogOut), equivalentes a los Tabler del mockup.
+- El shell reutiliza ProtectedRoute y useSession existentes (no se reinventan). Se monta solo con sesión autenticada.
+- Mockups añadidos al repo en docs/mockups/ como referencia de diseño.
+
+**Verificación.** lint/typecheck/build en verde. Manual (navegador): / redirige a /agenda; las tabs (desktop) y la bottom-nav (móvil) navegan entre las 3 secciones y marcan la activa; negocio + logout integrados; logout → /login; responsive (tabs ≥md, bottom-nav <md) confirmado estrechando la ventana; sin sesión → /login.
+
+**Commits.** `docs: add UI mockups for reference` + `feat(web): app shell con navegación H1 (tabs desktop + bottom-nav móvil)`
+
+**Deuda generada.** Placement del logout en móvil (topbar compacta) pendiente de validación visual fina. El Dashboard (backend ya hecho) no tiene sección de nav todavía — será su propia pantalla/tarea. Pantallas de datos de cada sección pendientes (tareas aparte).
+
+### 2026-06-27
+ — frontend-auth: cookie httpOnly + cimientos de auth en web
 
 **Qué se hizo.** Primera tarea de frontend (apps/web, Next.js 16) + reapertura acotada del backend de auth. Cimientos de autenticación en cliente y pantallas de login y registro de negocio.
 
