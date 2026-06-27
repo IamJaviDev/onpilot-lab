@@ -12,13 +12,7 @@ import {
   registerBusinessSchema,
   type RegisterBusinessInput,
 } from "@/lib/auth/schemas";
-import {
-  Button,
-  Field,
-  FormError,
-  Input,
-  Select,
-} from "@/components/auth/ui";
+import { Button, Field, FormError, Input, Select } from "@/components/ui/form";
 
 export function RegisterBusinessForm() {
   const { register: registerBusiness } = useSession();

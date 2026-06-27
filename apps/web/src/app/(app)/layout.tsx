@@ -1,5 +1,6 @@
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { AppShell } from "@/components/app/app-shell";
+import { QueryProvider } from "@/components/providers/query-provider";
 
 export default function AppLayout({
   children,
@@ -8,7 +9,9 @@ export default function AppLayout({
 }) {
   return (
     <ProtectedRoute>
-      <AppShell>{children}</AppShell>
+      <QueryProvider>
+        <AppShell>{children}</AppShell>
+      </QueryProvider>
     </ProtectedRoute>
   );
 }

@@ -1,5 +1,5 @@
-import { SectionPlaceholder } from "@/components/app/section-placeholder";
+import { ClientList } from "@/components/clients/client-list";
 
 export default function ClientesPage() {
-  return <SectionPlaceholder title="Clientes" />;
+  return <ClientList />;
 }

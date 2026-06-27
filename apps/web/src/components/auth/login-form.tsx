@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "@/lib/auth/session-context";
 import { loginSchema, type LoginInput } from "@/lib/auth/schemas";
-import { Button, Field, FormError, Input } from "@/components/auth/ui";
+import { Button, Field, FormError, Input } from "@/components/ui/form";
 
 export function LoginForm() {
   const { login } = useSession();
