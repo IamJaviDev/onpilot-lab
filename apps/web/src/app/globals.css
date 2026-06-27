@@ -6,8 +6,11 @@
   --foreground: #1f2421;
   --brand: #1d9e75; /* verde */
   --brand-hover: #178a65;
+  --brand-strong: #0f6e56; /* verde oscuro (hover mockup) */
+  --ink: #1a1a1a; /* texto fuerte mockup */
   --label: #6b7280; /* gris labels */
-  --border: #e3e3df;
+  --faint: #9ca3af; /* gris tenue (nav inactiva) */
+  --border: #e5e7eb; /* borde 0.5px del mockup */
 }
 
 @theme inline {
@@ -15,7 +18,10 @@
   --color-foreground: var(--foreground);
   --color-brand: var(--brand);
   --color-brand-hover: var(--brand-hover);
+  --color-brand-strong: var(--brand-strong);
+  --color-ink: var(--ink);
   --color-label: var(--label);
+  --color-faint: var(--faint);
   --color-border: var(--border);
   --font-sans: var(--font-dm-sans);
 }
