@@ -1,5 +1,5 @@
-import { SectionPlaceholder } from "@/components/app/section-placeholder";
+import { CashView } from "@/components/cash/cash-view";
 
 export default function CajaPage() {
-  return <SectionPlaceholder title="Caja" />;
+  return <CashView />;
 }
