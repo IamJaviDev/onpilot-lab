@@ -1,11 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelAppointment,
   createAppointment,
   getAppointment,
   listAppointments,
+  noShowAppointment,
   updateAppointment,
 } from "@/lib/appointments/appointments-api";
 import type {
+  CancelAppointmentPayload,
   CreateAppointmentPayload,
   ListAppointmentsParams,
   UpdateAppointmentPayload,
@@ -48,6 +51,23 @@ export function useUpdateAppointment(id: string) {
   return useMutation({
     mutationFn: (payload: UpdateAppointmentPayload) =>
       updateAppointment(id, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: appointmentKeys.all }),
+  });
+}
+
+export function useCancelAppointment(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CancelAppointmentPayload) =>
+      cancelAppointment(id, payload),
+    onSuccess: () => qc.invalidateQueries({ queryKey: appointmentKeys.all }),
+  });
+}
+
+export function useNoShowAppointment(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => noShowAppointment(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: appointmentKeys.all }),
   });
 }

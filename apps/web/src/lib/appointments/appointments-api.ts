@@ -1,6 +1,7 @@
 import { apiRequest } from "@/lib/api-client";
 import type {
   Appointment,
+  CancelAppointmentPayload,
   CreateAppointmentPayload,
   ListAppointmentsParams,
   UpdateAppointmentPayload,
@@ -40,5 +41,21 @@ export function updateAppointment(
   return apiRequest<Appointment>(`${BASE}/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export function cancelAppointment(
+  id: string,
+  payload: CancelAppointmentPayload,
+): Promise<Appointment> {
+  return apiRequest<Appointment>(`${BASE}/${id}/cancel`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function noShowAppointment(id: string): Promise<Appointment> {
+  return apiRequest<Appointment>(`${BASE}/${id}/no-show`, {
+    method: "PATCH",
   });
 }

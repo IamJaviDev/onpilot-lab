@@ -65,3 +65,8 @@ export interface UpdateAppointmentPayload {
   startsAt?: string;
   notes?: string | null;
 }
+
+/** Cancelación: motivo opcional (texto de gestión, máx 500). */
+export interface CancelAppointmentPayload {
+  reason?: string;
+}

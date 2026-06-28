@@ -10,6 +10,8 @@ export function ConfirmDialog({
   confirmLabel = "Confirmar",
   cancelLabel = "Cancelar",
   loading = false,
+  loadingLabel = "Borrando…",
+  error,
   onConfirm,
   onClose,
 }: {
@@ -19,12 +21,19 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   loading?: boolean;
+  loadingLabel?: string;
+  error?: string;
   onConfirm: () => void;
   onClose: () => void;
 }) {
   return (
     <Modal open={open} onClose={onClose} title={title}>
       <p className="text-sm text-label">{message}</p>
+      {error ? (
+        <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </p>
+      ) : null}
       <div className="mt-6 flex justify-end gap-3">
         <button
           type="button"
@@ -40,7 +49,7 @@ export function ConfirmDialog({
           disabled={loading}
           className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
         >
-          {loading ? "Borrando…" : confirmLabel}
+          {loading ? loadingLabel : confirmLabel}
         </button>
       </div>
     </Modal>

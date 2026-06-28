@@ -2,23 +2,31 @@ import type { Appointment } from "@/lib/appointments/types";
 import { formatTime } from "@/lib/appointments/day-range";
 import { STATUS_STYLES } from "./appointment-status";
 
-const EDITABLE: Appointment["status"][] = ["SCHEDULED", "CONFIRMED"];
+// Estados activos: admiten cobrar, editar, cancelar y no-show. Los terminales
+// (COMPLETED/CANCELLED/NO_SHOW) solo muestran datos.
+const ACTIVE: Appointment["status"][] = ["SCHEDULED", "CONFIRMED"];
 
 /**
- * Detalle de cita (solo lectura de agenda). El botón "Editar" solo se ofrece en
- * estados activos; cobrar/cancelar llegan en la Pieza 3.
+ * Detalle de cita. Las acciones (cobrar/editar/cancelar/no-show) solo se ofrecen
+ * en estados activos.
  */
 export function AppointmentDetail({
   appointment,
   zone,
+  onCharge,
   onEdit,
+  onCancel,
+  onNoShow,
 }: {
   appointment: Appointment;
   zone: string;
+  onCharge: () => void;
   onEdit: () => void;
+  onCancel: () => void;
+  onNoShow: () => void;
 }) {
   const status = STATUS_STYLES[appointment.status];
-  const canEdit = EDITABLE.includes(appointment.status);
+  const isActive = ACTIVE.includes(appointment.status);
 
   return (
     <div className="flex flex-col gap-4">
@@ -51,14 +59,39 @@ export function AppointmentDetail({
         </Row>
       ) : null}
 
-      {canEdit ? (
-        <button
-          type="button"
-          onClick={onEdit}
-          className="mt-2 w-full rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-hover"
-        >
-          Editar cita
-        </button>
+      {isActive ? (
+        <div className="mt-2 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onCharge}
+            className="w-full rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-hover"
+          >
+            Cobrar y cerrar
+          </button>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="w-full rounded-xl border border-border bg-white px-4 py-3 text-sm font-medium text-ink transition hover:bg-background"
+          >
+            Editar cita
+          </button>
+          <div className="mt-1 flex gap-2 border-t border-border pt-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50"
+            >
+              Cancelar cita
+            </button>
+            <button
+              type="button"
+              onClick={onNoShow}
+              className="flex-1 rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-medium text-ink transition hover:bg-background"
+            >
+              No-show
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

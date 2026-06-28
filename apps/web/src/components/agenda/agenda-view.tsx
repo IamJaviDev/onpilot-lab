@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useSession } from "@/lib/auth/session-context";
 import {
   useAppointmentsList,
   useCreateAppointment,
+  useNoShowAppointment,
   useUpdateAppointment,
 } from "@/lib/appointments/queries";
 import {
@@ -22,6 +24,8 @@ import type { Appointment } from "@/lib/appointments/types";
 import { AppointmentCard } from "./appointment-card";
 import { AppointmentDetail } from "./appointment-detail";
 import { AppointmentForm } from "./appointment-form";
+import { AppointmentCharge } from "./appointment-charge";
+import { CancelAppointmentDialog } from "./cancel-appointment-dialog";
 
 export function AgendaView() {
   const { activeBusiness } = useSession();
@@ -44,7 +48,10 @@ type ModalState =
   | { type: "none" }
   | { type: "create" }
   | { type: "detail"; appointment: Appointment }
-  | { type: "edit"; appointment: Appointment };
+  | { type: "edit"; appointment: Appointment }
+  | { type: "charge"; appointment: Appointment }
+  | { type: "cancel"; appointment: Appointment }
+  | { type: "noshow"; appointment: Appointment };
 
 /** Separado para inicializar el día una vez conocida la zona del negocio. */
 function AgendaForZone({ zone }: { zone: string }) {
@@ -145,8 +152,17 @@ function AgendaForZone({ zone }: { zone: string }) {
           <AppointmentDetail
             appointment={modal.appointment}
             zone={zone}
+            onCharge={() =>
+              setModal({ type: "charge", appointment: modal.appointment })
+            }
             onEdit={() =>
               setModal({ type: "edit", appointment: modal.appointment })
+            }
+            onCancel={() =>
+              setModal({ type: "cancel", appointment: modal.appointment })
+            }
+            onNoShow={() =>
+              setModal({ type: "noshow", appointment: modal.appointment })
             }
           />
         ) : null}
@@ -161,7 +177,70 @@ function AgendaForZone({ zone }: { zone: string }) {
           />
         ) : null}
       </Modal>
+
+      <Modal
+        open={modal.type === "charge"}
+        onClose={close}
+        title="Cobrar y cerrar"
+      >
+        {modal.type === "charge" ? (
+          <AppointmentCharge appointment={modal.appointment} onDone={close} />
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={modal.type === "cancel"}
+        onClose={close}
+        title="Cancelar cita"
+      >
+        {modal.type === "cancel" ? (
+          <CancelAppointmentDialog
+            appointmentId={modal.appointment.id}
+            onDone={close}
+          />
+        ) : null}
+      </Modal>
+
+      {modal.type === "noshow" ? (
+        <NoShowConfirm appointmentId={modal.appointment.id} onClose={close} />
+      ) : null}
     </div>
+  );
+}
+
+/** No-show: confirmación simple (sin motivo) sobre ConfirmDialog. */
+function NoShowConfirm({
+  appointmentId,
+  onClose,
+}: {
+  appointmentId: string;
+  onClose: () => void;
+}) {
+  const mutation = useNoShowAppointment(appointmentId);
+  const [error, setError] = useState<string>();
+
+  const confirm = async () => {
+    setError(undefined);
+    try {
+      await mutation.mutateAsync();
+      onClose();
+    } catch {
+      setError("No se pudo marcar. La cita puede que ya no esté activa.");
+    }
+  };
+
+  return (
+    <ConfirmDialog
+      open
+      title="Marcar no-show"
+      message="¿Marcar esta cita como no presentada? El cliente no acudió."
+      confirmLabel="Marcar no-show"
+      loadingLabel="Guardando…"
+      loading={mutation.isPending}
+      error={error}
+      onConfirm={confirm}
+      onClose={onClose}
+    />
   );
 }
 
