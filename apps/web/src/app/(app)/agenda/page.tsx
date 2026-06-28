@@ -1,5 +1,5 @@
-import { SectionPlaceholder } from "@/components/app/section-placeholder";
+import { AgendaView } from "@/components/agenda/agenda-view";
 
 export default function AgendaPage() {
-  return <SectionPlaceholder title="Agenda" />;
+  return <AgendaView />;
 }

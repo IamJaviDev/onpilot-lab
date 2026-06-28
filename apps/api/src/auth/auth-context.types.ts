@@ -10,6 +10,7 @@ export interface CurrentBusinessContext {
   id: string;
   name: string;
   role: BusinessMemberRole;
+  timezone: string;
 }
 
 declare global {

@@ -63,6 +63,7 @@ export class JwtAuthGuard implements CanActivate {
           id: membership.business.id,
           name: membership.business.name,
           role: membership.role,
+          timezone: membership.business.timezone,
         }
       : null;
 

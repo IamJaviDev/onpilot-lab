@@ -12,6 +12,7 @@ export interface ActiveBusiness {
   id: string;
   name: string;
   role: string;
+  timezone: string;
 }
 
 export interface MeResponse {
