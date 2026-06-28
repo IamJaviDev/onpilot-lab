@@ -73,6 +73,23 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-06-28 — frontend Agenda Pieza 1: vista de día (solo lectura)
+
+**Qué se hizo.** Primera de las tres piezas de la Agenda. Vista de día en /agenda (solo lectura): citas del día en lista ordenada por hora, navegación temporal (hoy / día anterior-siguiente / selector de fecha), cada cita con hora, cliente, servicio y badge de estado coloreado. Estados de carga/error/vacío. Consume GET /api/appointments con from/to del día.
+
+**Decisiones clave.**
+- PRIMER consumidor de Business.timezone en frontend. Desviación mínima de backend: expuesto timezone en /api/auth/me (campo añadido en CurrentBusinessContext + jwt-auth.guard; el include de business ya lo traía, me() no se tocó). Los límites del día se calculan en la zona del negocio con luxon (DST-safe), no en la del navegador. Coherente con el Dashboard backend.
+- luxon en el frontend (misma librería que el backend; no se metió date-fns).
+- Capa de datos appointments espejo de la de Clientes (types/api/queries + day-range). Respuesta tipada como array pelado (código real, no {items} del doc). Cada cita embebe client y service.
+- Color por estado: CONFIRMED verde, SCHEDULED azul/claro, COMPLETED gris, CANCELLED rojo atenuado, NO_SHOW ámbar. Canceladas/no-show atenuadas, no ocultas.
+- Vista de DÍA con lista ordenada por hora (no grid de franjas, no semana). Solo-lectura estricto (sin crear/editar/cobrar — Piezas 2-3).
+
+**Verificación.** lint/typecheck/build en verde. dayBounds DST-safe verificado con luxon aislado (Madrid verano/invierno/día de cambio DST, New York). /me devuelve activeBusiness con timezone sin romper login/bootstrap/F5. Manual (navegador): la agenda carga, navega entre días, estado vacío correcto, y con citas sembradas por curl se pintan las tarjetas con hora en zona del negocio (11:00/13:00 Madrid), cliente, servicio y badge.
+
+**Commit.** `feat(web): agenda vista de día (solo lectura) + timezone en /me`
+
+**Deuda generada.** Inconsistencia doc: 06-api-contracts documenta GET /appointments como {items} pero el código devuelve array pelado — alinear el doc (microtarea). Las Piezas 2 (crear/editar) y 3 (estado + cobro inline) de la agenda quedan pendientes.
+
 ### 2026-06-27 — frontend Clientes básica + TanStack Query
 
 **Qué se hizo.** Tercera pieza de frontend y PRIMERA pantalla de datos. Pantalla Clientes contra la API real: listado con búsqueda (debounce 300ms) y paginación, crear/editar (modal con ClientForm reutilizable), toggle VIP + %, borrado soft con confirmación, y ficha /clientes/[id] con los datos que el backend da hoy. Introducido TanStack Query como capa de datos del frontend.
