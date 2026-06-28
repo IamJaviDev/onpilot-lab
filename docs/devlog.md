@@ -18,6 +18,14 @@ todo y se actualiza la sección de deuda.
 Lista viva. Cuando algo se resuelve, se marca y se mueve al asiento de la tarea que
 lo cerró.
 
+- [ ] **Inconsistencia doc: forma de GET /appointments.** `docs/06-api-contracts.md` documenta
+  la respuesta como `{ items: [...] }`, pero el código real devuelve un array pelado
+  (`Appointment[]`). Alinear el doc con el código. Microtarea de documentación.
+  _(Detectado en Agenda Pieza 1.)_
+- [ ] **Buscador de cliente en formulario de cita.** El selector de cliente usa `<select>` con
+  `limit:100` ordenado por nombre en cliente; `GET /clients` ordena por `createdAt`. Si la base
+  de clientes supera ~100, el selector se queda corto. Sustituir por input con búsqueda/
+  autocomplete cuando crezca. _(Generado en Agenda Pieza 2.)_
 - [ ] **CSRF token en Auth.** El refresh token va en cookie httpOnly con `sameSite:'strict'`,
   que es mitigación suficiente para MVP. Si en el futuro se relaja a `lax`/`none` (p. ej. por
   necesidades cross-site), hay que añadir un token CSRF explícito. _(Generado en frontend-auth.)_
@@ -72,6 +80,25 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
   para recalcular. _(Services.)_
 
 ## Asientos
+
+
+### 2026-06-28 — frontend Agenda Pieza 2: crear / editar / detalle de cita
+
+**Qué se hizo.** Segunda pieza de la Agenda. La vista de día ahora es escribible: botón "Nueva cita" (prefijado al día visible + próxima hora en punto), tarjetas clicables → modal de detalle → editar. Formulario de cita reutilizable (alta + edición) con selección de cliente y servicio. Todo contra la API real, sin tocar backend.
+
+**Decisiones clave.**
+- Timezone en AMBAS direcciones con luxon (helpers puros en day-range): buildStartsAt (día+hora en zona del negocio → ISO con offset, lo que exige el backend) y splitInstant (su inverso, para prefijar la edición convirtiendo el startsAt UTC a hora local). nextRoundTime para el default. Round-trip verificado, incluido día de cambio DST.
+- Edición envía solo dirtyFields (RHF): así editar solo las notas no reenvía un startsAt antiguo que dispararía el 400 de "pasado". clientId inmutable en edición (regla del backend respetada en UI: cliente como disabled, no se envía).
+- Mapeo de errores específico: 409 → "franja ya ocupada"; 400 → pasado / servicio inactivo / cliente no válido; fallback genérico. No genéricos.
+- Botón "Editar" solo en SCHEDULED/CONFIRMED; citas terminales (COMPLETED/CANCELLED/NO_SHOW) no se editan (regla del backend en UI).
+- Selección sobre datos reales (no autocomplete de texto libre del mockup): select de clientes (limit 100, orden por nombre) + select de servicios activos con etiqueta "nombre · duración · precio" (precio solo display). source NO se envía (el backend fija MANUAL).
+- Nueva capa lib/services (types/api/queries) para el selector. Máquina de modales none|create|detail|edit. Sin cancelar/cobrar (Pieza 3).
+
+**Verificación.** lint/typecheck/build verde. Luxon aislado: buildStartsAt con offset correcto por zona/estación (Madrid verano/invierno, Canarias, NY); splitInstant inverso exacto incluido DST; usa zona del negocio no del navegador. Manual (navegador): crear cita → aparece sin recargar; hora se guarda con offset correcto; 409 de solapamiento con mensaje claro; editar refleja cambios (cliente inmutable); fecha en pasado → mensaje claro; selector de servicio vacío → "crea un servicio primero".
+
+**Commit.** `feat(web): agenda — crear/editar/detalle de cita (modales, tz-aware)`
+
+**Deuda generada.** Buscador de cliente cuando la base supere ~100 (hoy limit 100 + orden por nombre en cliente; GET /clients ordena por createdAt). source/"Canal de reserva" del mockup omitido (backend fija MANUAL).
 
 ### 2026-06-28 — frontend Agenda Pieza 1: vista de día (solo lectura)
 
