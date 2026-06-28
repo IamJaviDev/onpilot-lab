@@ -81,6 +81,23 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-06-28 — frontend Caja: cierre de caja por periodo
+
+**Qué se hizo.** Pantalla Caja en /caja (solo lectura): resumen de cobros por periodo (Hoy / Esta semana / Este mes / Este año), consumiendo GET /api/cash/summary. Cierra la tercera sección del shell. Sin tocar backend.
+
+**Decisiones clave.**
+- Helper genérico periodBounds(period, zone) en lib/period.ts (NO acoplado a cash ni a citas): traduce hoy/semana/mes/año a rango from/to en la zona del negocio con luxon (DST-safe, semana en lunes ISO). Reutilizable por el Dashboard frontend futuro.
+- Periodo por defecto: Hoy. Etiqueta "Cobros" (no "Clientes atendidos" del mockup, que sería engañoso: paymentsCount son cobros, no clientes distintos).
+- KPIs: Facturado (destacado), Ticket medio, Cobros, Servicio top. Desgloses: servicios por facturación (top 5) y por método de pago (labels de PAYMENT_METHODS reutilizados de lib/payments). errorsCount como línea sutil solo si >0.
+- Importes solo display (regla de oro): formatEur sobre los number del backend, cero recálculo. Estados carga/error/vacío ("Sin transacciones en este período").
+- Gráfico "facturación últimos 6 meses" → "Próximamente" (el endpoint no da serie temporal). "Últimas transacciones" del mockup fuera (requeriría GET /payments por rango).
+
+**Verificación.** lint/typecheck/build verde. periodBounds validado con luxon aislado: semana lunes local, mes 1→fin local, año 1-ene→31-dic local, todo a UTC con offset, DST-safe (año arranca invierno +01:00, mes julio verano +02:00); zona del negocio no del navegador. Manual (navegador): caja con datos reales; el cobro de la Pieza 3 (Favian, Bizum 18€) aparece; coherencia al céntimo (Facturado 54€ / 4 cobros / ticket 13,50€; desglose por método suma el total).
+
+**Commit.** `feat(web): pantalla Caja (cierre de caja por periodo, tz-aware)`
+
+**Deuda generada.** Gráfico "facturación últimos 6 meses" pendiente (requiere serie temporal — endpoint nuevo o N llamadas). "Últimas transacciones" del mockup pendiente (requiere GET /payments por rango; /cash/summary solo da agregados). lib/period.ts listo para el Dashboard frontend.
+
 ### 2026-06-28 — frontend Agenda Pieza 3: gestión de estado + cobro inline
 
 **Qué se hizo.** Tercera y última pieza de la Agenda; cierra el ciclo de vida de una cita desde su detalle: cancelar (motivo opcional), marcar no-show, y el cobro inline "Cobrar y cerrar" consumiendo el módulo Payments. Con esto la Agenda queda completa (vista + crear/editar + estado/cobro).
