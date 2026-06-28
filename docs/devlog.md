@@ -81,6 +81,24 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-06-28 — frontend Dashboard de H1 como home (/inicio)
+
+**Qué se hizo.** Pantalla de panel en /inicio con los 8 KPIs de H1, convertida en home (/ redirige a /inicio en vez de /agenda) con su entrada de nav. Solo lectura. Cierra el shell completo (4 secciones: Inicio / Agenda / Clientes / Caja). Sin tocar backend.
+
+**Decisiones clave.**
+- Dashboard como HOME (no tab secundaria): será el centro de mando del producto cuando lleguen H2/H4/H5. Ruta propia /inicio (slug en español, coherente con /agenda /clientes /caja) y / redirige ahí. Entrada "Inicio" primera en el nav (icono LayoutDashboard); desktop-nav y bottom-nav iteran NAV_ITEMS → añadir el item los actualiza ambos sin tocarlos.
+- Tarjeta KPI reutilizable (label + value + subtitle? + highlight?), pensada para crecer. 7 tarjetas + sección topServices. Facturado este mes destacado.
+- Consume GET /api/dashboard/h1 (sin query params; los límites hoy/mes los calcula el backend en la zona del negocio). Importes solo display (formatEur, regla de oro). clientsToReactivate como conteo con subtítulo ("+60 días"), sin enlace a lista (no hay endpoint). Subtítulos aclaratorios en próximas citas y reactivar.
+- Alcance estricto: solo los 8 KPIs de H1. KPIs de otras herramientas (WhatsApp/redes) fuera — no existen aún.
+- TopService local en lib/dashboard (sin acoplar a lib/cash).
+
+**Verificación.** lint/typecheck/build verde (/inicio en el build, resto intactas). Manual (navegador): / redirige a /inicio; las 4 tabs navegan y marcan activa (Inicio primero); dashboard con datos reales; verificación cruzada con Caja (facturado este mes 54€ coincide entre dashboard y caja — dos endpoints, mismo resultado); bottom-nav móvil con las 4 secciones.
+
+**Commit.** `feat(web): dashboard de H1 como home (/inicio) + entrada de nav`
+
+**Deuda generada.** Dashboard sin deltas/sparklines ni comparativas (sin histórico — el backend no da serie temporal). clientsToReactivate es conteo, no lista navegable (no hay endpoint de lista de reactivación). El dashboard crecerá con KPIs de H2/H4/H5 cuando existan.
+
+
 ### 2026-06-28 — frontend Caja: cierre de caja por periodo
 
 **Qué se hizo.** Pantalla Caja en /caja (solo lectura): resumen de cobros por periodo (Hoy / Esta semana / Este mes / Este año), consumiendo GET /api/cash/summary. Cierra la tercera sección del shell. Sin tocar backend.
