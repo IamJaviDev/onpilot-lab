@@ -1,4 +1,10 @@
-import { BarChart3, Calendar, Users, type LucideIcon } from "lucide-react";
+import {
+  BarChart3,
+  Calendar,
+  LayoutDashboard,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 
 export interface NavItem {
   href: string;
@@ -6,8 +12,9 @@ export interface NavItem {
   icon: LucideIcon;
 }
 
-/** Secciones de H1 (mockup m-bottom-nav: Agenda · Clientes · Caja). */
+/** Secciones de H1: Inicio (dashboard) · Agenda · Clientes · Caja. */
 export const NAV_ITEMS: NavItem[] = [
+  { href: "/inicio", label: "Inicio", icon: LayoutDashboard },
   { href: "/agenda", label: "Agenda", icon: Calendar },
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/caja", label: "Caja", icon: BarChart3 },
