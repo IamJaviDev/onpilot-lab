@@ -69,3 +69,45 @@ export function formatDayLabel(dayISO: string, zone: string): string {
 export function formatTime(instantISO: string, zone: string): string {
   return DateTime.fromISO(instantISO).setZone(zone).toFormat("HH:mm");
 }
+
+/**
+ * Construye `startsAt` desde la fecha+hora elegidas por el usuario INTERPRETADAS
+ * en la zona del negocio → ISO-8601 CON offset (±HH:MM). Reverso de la Pieza 1:
+ * nunca usa la zona del navegador. Es lo que exige el backend.
+ */
+export function buildStartsAt(
+  dayISO: string,
+  timeHHmm: string,
+  zone: string,
+): string {
+  const dt = DateTime.fromISO(`${dayISO}T${timeHHmm}`, { zone });
+  const value = dt.toISO();
+  if (value === null) {
+    throw new Error("Fecha/hora inválida al construir startsAt");
+  }
+  return value;
+}
+
+/**
+ * Inverso de buildStartsAt: parte un instante (UTC) en {day, time} en la zona
+ * del negocio, para prefijar el formulario en edición.
+ */
+export function splitInstant(
+  instantISO: string,
+  zone: string,
+): { day: string; time: string } {
+  const dt = DateTime.fromISO(instantISO).setZone(zone);
+  return { day: toIsoDate(dt), time: dt.toFormat("HH:mm") };
+}
+
+/**
+ * Próxima hora en punto en la zona del negocio, como {day, time}. Default de
+ * "Nueva cita" (editable). Si ya pasó la última hora del día, rueda al siguiente.
+ */
+export function nextRoundTime(zone: string): { day: string; time: string } {
+  const dt = DateTime.now()
+    .setZone(zone)
+    .plus({ hours: 1 })
+    .startOf("hour");
+  return { day: toIsoDate(dt), time: dt.toFormat("HH:mm") };
+}

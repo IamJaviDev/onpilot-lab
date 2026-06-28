@@ -1,17 +1,27 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
 import { useSession } from "@/lib/auth/session-context";
-import { useAppointmentsList } from "@/lib/appointments/queries";
+import {
+  useAppointmentsList,
+  useCreateAppointment,
+  useUpdateAppointment,
+} from "@/lib/appointments/queries";
 import {
   dayBounds,
   formatDayLabel,
   isToday,
+  nextRoundTime,
   shiftDay,
+  splitInstant,
   todayInZone,
 } from "@/lib/appointments/day-range";
+import type { Appointment } from "@/lib/appointments/types";
 import { AppointmentCard } from "./appointment-card";
+import { AppointmentDetail } from "./appointment-detail";
+import { AppointmentForm } from "./appointment-form";
 
 export function AgendaView() {
   const { activeBusiness } = useSession();
@@ -30,19 +40,37 @@ export function AgendaView() {
   return <AgendaForZone zone={zone} />;
 }
 
+type ModalState =
+  | { type: "none" }
+  | { type: "create" }
+  | { type: "detail"; appointment: Appointment }
+  | { type: "edit"; appointment: Appointment };
+
 /** Separado para inicializar el día una vez conocida la zona del negocio. */
 function AgendaForZone({ zone }: { zone: string }) {
   const [day, setDay] = useState(() => todayInZone(zone));
+  const [modal, setModal] = useState<ModalState>({ type: "none" });
 
   const range = useMemo(() => dayBounds(day, zone), [day, zone]);
   const query = useAppointmentsList(range);
 
   const items = query.data ?? [];
   const onToday = isToday(day, zone);
+  const close = () => setModal({ type: "none" });
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-6">
-      <h1 className="text-xl font-bold text-ink">Agenda</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-bold text-ink">Agenda</h1>
+        <button
+          type="button"
+          onClick={() => setModal({ type: "create" })}
+          className="flex items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover"
+        >
+          <Plus size={16} />
+          Nueva cita
+        </button>
+      </div>
 
       <div className="flex items-center gap-2">
         <button
@@ -96,11 +124,116 @@ function AgendaForZone({ zone }: { zone: string }) {
               key={appointment.id}
               appointment={appointment}
               zone={zone}
+              onSelect={(a) => setModal({ type: "detail", appointment: a })}
             />
           ))
         )}
       </div>
+
+      <Modal open={modal.type === "create"} onClose={close} title="Nueva cita">
+        {modal.type === "create" ? (
+          <CreateAppointmentForm zone={zone} defaultDay={day} onDone={close} />
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={modal.type === "detail"}
+        onClose={close}
+        title="Detalle de cita"
+      >
+        {modal.type === "detail" ? (
+          <AppointmentDetail
+            appointment={modal.appointment}
+            zone={zone}
+            onEdit={() =>
+              setModal({ type: "edit", appointment: modal.appointment })
+            }
+          />
+        ) : null}
+      </Modal>
+
+      <Modal open={modal.type === "edit"} onClose={close} title="Editar cita">
+        {modal.type === "edit" ? (
+          <EditAppointmentForm
+            appointment={modal.appointment}
+            zone={zone}
+            onDone={close}
+          />
+        ) : null}
+      </Modal>
     </div>
+  );
+}
+
+/** Wrapper que aísla la mutación de alta (hook por modal abierto). */
+function CreateAppointmentForm({
+  zone,
+  defaultDay,
+  onDone,
+}: {
+  zone: string;
+  defaultDay: string;
+  onDone: () => void;
+}) {
+  const mutation = useCreateAppointment();
+  const defaultTime = useMemo(() => nextRoundTime(zone).time, [zone]);
+
+  return (
+    <AppointmentForm
+      mode="create"
+      zone={zone}
+      submitLabel="Crear cita"
+      defaultValues={{
+        clientId: "",
+        serviceId: "",
+        date: defaultDay,
+        time: defaultTime,
+        notes: "",
+      }}
+      onSubmit={async (payload) => {
+        await mutation.mutateAsync(payload);
+        onDone();
+      }}
+      onCancel={onDone}
+    />
+  );
+}
+
+/** Wrapper que aísla la mutación de edición (hook keyed por id de la cita). */
+function EditAppointmentForm({
+  appointment,
+  zone,
+  onDone,
+}: {
+  appointment: Appointment;
+  zone: string;
+  onDone: () => void;
+}) {
+  const mutation = useUpdateAppointment(appointment.id);
+  const { day, time } = splitInstant(appointment.startsAt, zone);
+
+  return (
+    <AppointmentForm
+      mode="edit"
+      zone={zone}
+      submitLabel="Guardar cambios"
+      lockedClient={{
+        id: appointment.client.id,
+        name: appointment.client.name,
+      }}
+      defaultValues={{
+        clientId: appointment.client.id,
+        serviceId: appointment.service.id,
+        date: day,
+        time,
+        notes: appointment.notes ?? "",
+      }}
+      onSubmit={async (payload) => {
+        await mutation.mutateAsync(payload);
+        onDone();
+      }}
+      onCancel={onDone}
+    />
   );
 }
 

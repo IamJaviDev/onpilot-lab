@@ -9,14 +9,18 @@ import { STATUS_STYLES } from "./appointment-status";
 export function AppointmentCard({
   appointment,
   zone,
+  onSelect,
 }: {
   appointment: Appointment;
   zone: string;
+  onSelect: (appointment: Appointment) => void;
 }) {
   const status = STATUS_STYLES[appointment.status];
   return (
-    <div
-      className={`flex items-center gap-3 rounded-xl border border-border bg-white px-3 py-2.5 ${
+    <button
+      type="button"
+      onClick={() => onSelect(appointment)}
+      className={`flex w-full items-center gap-3 rounded-xl border border-border bg-white px-3 py-2.5 text-left transition hover:border-[#D1D5DB] hover:bg-background ${
         status.dimmed ? "opacity-40" : ""
       }`}
     >
@@ -34,6 +38,6 @@ export function AppointmentCard({
       >
         {status.label}
       </span>
-    </div>
+    </button>
   );
 }
