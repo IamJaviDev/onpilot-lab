@@ -81,6 +81,23 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-06-28 — frontend Agenda Pieza 3: gestión de estado + cobro inline
+
+**Qué se hizo.** Tercera y última pieza de la Agenda; cierra el ciclo de vida de una cita desde su detalle: cancelar (motivo opcional), marcar no-show, y el cobro inline "Cobrar y cerrar" consumiendo el módulo Payments. Con esto la Agenda queda completa (vista + crear/editar + estado/cobro).
+
+**Decisiones clave.**
+- REGLA DE ORO MONETARIA hecha imposible de violar por tipos: CreatePaymentPayload NO tiene campo finalPrice. El front envía solo manualDiscountAmount + paymentMethod; el backend calcula el finalPrice con Decimal. La previsualización del total en el front (base − VIP − manual) es SOLO orientativa; el importe que se muestra/persiste tras cobrar es resp.finalPrice del backend.
+- Cobro: desde detalle de cita activa → modal propio. Precio base (del servicio de la cita), descuento VIP automático (vía useClient para previsualizar isVip/vipDiscountPercent), descuento manual en € (manualDiscountAmount, no % — el DTO es importe), método de pago (default CASH). Éxito muestra "Cobrado {finalPrice}€" del backend y auto-cierra a 1,5s solo en éxito (en error permanece con el mensaje). Tras cobrar, la cita pasa a COMPLETED atómicamente.
+- Errores mapeados: 409 → "Esta cita ya está cobrada" (doble cobro); 400 "exceed" → "Los descuentos superan el precio base". No genéricos.
+- Label "Cobrada" para COMPLETED en la UI (estado backend sigue COMPLETED), coherente en lista y detalle.
+- Cancelar: motivo opcional + confirmación → CANCELLED. No-show: confirmación simple → NO_SHOW. Reutilizado confirm-dialog (props aditivas loadingLabel/error) para no-show. Citas terminales no ofrecen acciones.
+- Nueva capa lib/payments (types/api/queries) + lib/format (formatEur). Sin tocar backend.
+
+**Verificación.** lint/typecheck/build verde. Regla de oro validada con números (base 20 / VIP 10% → 18; 45/VIP → 40,50). Manual (navegador): cobro VIP exacto (Favian, base 20 − 10% = 18,00€ al céntimo, coincide front/backend); descuento manual aplicado; doble cobro bloqueado (cita Cobrada no ofrece cobrar); descuentos > base → 400 claro; cancelar → CANCELLED atenuada; no-show → NO_SHOW.
+
+**Commit.** `feat(web): agenda — cobro inline + cancelar/no-show (regla de oro monetaria)`
+
+**Deuda generada.** Detalle de cita COMPLETED no muestra el desglose del cobro realizado (requeriría GET /payments por cita) — solo el badge "Cobrada". Descuento manual en € (se omite el % del mockup, que era incoherente con el DTO). Selector de método de pago añadido (no estaba en el mockup).
 
 ### 2026-06-28 — frontend Agenda Pieza 2: crear / editar / detalle de cita
 
