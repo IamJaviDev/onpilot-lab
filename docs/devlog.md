@@ -56,7 +56,7 @@ lo cerró.
 - [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando
   exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
 - [X] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit),
-  historial de citas/cobros y tags por actividad (REACTIVATE/REGULAR). Ya existen
+  historial de citas/cobros (REACTIVATE/REGULAR). Ya existen
   Appointments y Payments → plenamente accionable. _(Generado en Clients.) Cerrado el 01/07/26_
 - [ ] **Bloqueo de soft-delete de servicio con citas.** No permitir borrar un servicio
   que tenga citas asociadas. Ya existe Appointments → accionable. _(Generado en Services.)_
@@ -66,6 +66,19 @@ lo cerró.
 - [ ] **Cobro de importe libre sin servicio.** No soportado en MVP: todo cobro exige un
   servicio (de la cita o explícito) como origen del basePrice. Si se necesita cobrar un
   importe arbitrario sin servicio, decisión de producto futura. _(Generado en Payments.)_
+  - [ ] **Gráfico "facturación últimos 6 meses" (Caja/Dashboard).** Requiere serie temporal
+  que ningún endpoint da (endpoint nuevo o N llamadas). _(Generado en Caja.)_
+- [ ] **"Últimas transacciones" en Caja.** Requiere GET /payments por rango; /cash/summary
+  solo da agregados. _(Generado en Caja.)_
+- [ ] **Desglose del cobro en cita COMPLETED.** El detalle de una cita cobrada solo muestra
+  el badge "Cobrada", no el desglose del pago (requeriría GET /payments por cita).
+  _(Generado en Agenda Pieza 3.)_
+  - [ ] **Tags por actividad (REACTIVATE/REGULAR).** computeTags solo da VIP/NEW. Los tags
+  derivados de comportamiento (a reactivar, regular) quedaron fuera de la ficha enriquecida.
+  _(Generado en Ficha enriquecida, 01/07/26.)_
+- [ ] **Cita activa vencida sin cerrar.** Una cita SCHEDULED/CONFIRMED con startsAt ya pasado
+  no aparece ni en próximas ni en historial de la ficha. Aceptable MVP.
+  _(Generado en Ficha enriquecida, 01/07/26.)_
 
 ## Convenciones / Notas permanentes
 
