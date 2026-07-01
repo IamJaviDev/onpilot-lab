@@ -7,6 +7,7 @@ import { ChevronLeft, Mail, Pencil, Phone, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ClientAvatar, ClientTag } from "./client-bits";
+import { ClientActivity } from "./client-activity";
 import { ClientForm } from "./client-form";
 import { VipToggle } from "./vip-toggle";
 import { useDeleteClient, useUpdateClient } from "@/lib/clients/queries";
@@ -96,14 +97,8 @@ export function ClientDetailView({ client }: { client: ClientDetail }) {
         )}
       </div>
 
-      {/* Secciones que requieren backend nuevo */}
-      <div className="rounded-xl border border-dashed border-border bg-white p-4">
-        <SectionLabel>Actividad</SectionLabel>
-        <p className="mt-2 text-sm text-label">
-          Visitas, gasto total, próximas citas e historial llegarán
-          próximamente.
-        </p>
-      </div>
+      {/* Actividad: stats, próximas citas e historial */}
+      <ClientActivity client={client} />
 
       {/* Borrar */}
       <div className="border-t border-border pt-4">

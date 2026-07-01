@@ -3,7 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
+import {
+  AppointmentStatus,
+  PaymentMethod,
+  PaymentStatus,
+  Prisma,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { ListClientsQueryDto } from './dto/list-clients-query.dto';
@@ -12,6 +17,43 @@ import { UpdateClientVipDto } from './dto/update-client-vip.dto';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
+
+// Tamaño de las listas de la ficha enriquecida (sin paginación en MVP).
+const HISTORY_LIMIT = 10;
+
+// Estados de cita "activa" (bloquean disponibilidad, cuentan como próximas)
+// y "terminal" (historial). Una cita activa con startsAt ya pasado (vencida
+// sin cerrar) no cae en ninguna lista: aceptable en MVP (micro-deuda).
+const ACTIVE_STATUSES: AppointmentStatus[] = [
+  AppointmentStatus.SCHEDULED,
+  AppointmentStatus.CONFIRMED,
+];
+const TERMINAL_STATUSES: AppointmentStatus[] = [
+  AppointmentStatus.COMPLETED,
+  AppointmentStatus.CANCELLED,
+  AppointmentStatus.NO_SHOW,
+];
+
+// Solo se seleccionan los campos que expone la ficha (servicio embebido).
+const APPOINTMENT_SELECT = {
+  id: true,
+  startsAt: true,
+  endsAt: true,
+  status: true,
+  service: { select: { id: true, name: true } },
+} satisfies Prisma.AppointmentSelect;
+
+const PAYMENT_SELECT = {
+  id: true,
+  basePrice: true,
+  vipDiscountAmount: true,
+  manualDiscountAmount: true,
+  finalPrice: true,
+  paymentMethod: true,
+  status: true,
+  paidAt: true,
+  service: { select: { id: true, name: true } },
+} satisfies Prisma.PaymentSelect;
 
 interface ClientRow {
   id: string;
@@ -22,6 +64,26 @@ interface ClientRow {
   isVip: boolean;
   vipDiscountPercent: number;
   createdAt: Date;
+}
+
+interface AppointmentRow {
+  id: string;
+  startsAt: Date;
+  endsAt: Date;
+  status: AppointmentStatus;
+  service: { id: string; name: string };
+}
+
+interface PaymentRow {
+  id: string;
+  basePrice: Prisma.Decimal;
+  vipDiscountAmount: Prisma.Decimal;
+  manualDiscountAmount: Prisma.Decimal;
+  finalPrice: Prisma.Decimal;
+  paymentMethod: PaymentMethod;
+  status: PaymentStatus;
+  paidAt: Date | null;
+  service: { id: string; name: string } | null;
 }
 
 @Injectable()
@@ -76,7 +138,9 @@ export class ClientsService {
     }
   }
 
-  async getOne(businessId: string, id: string) {
+  // Ficha básica (datos del cliente). La usan create/update/updateVip para
+  // NO disparar las agregaciones caras de la ficha enriquecida.
+  private async findBasic(businessId: string, id: string) {
     const client = await this.prisma.client.findFirst({
       where: { id, businessId, deletedAt: null },
     });
@@ -84,6 +148,126 @@ export class ClientsService {
       throw new NotFoundException('Client not found');
     }
     return this.toDetail(client);
+  }
+
+  // Ficha enriquecida (GET /clients/:id): datos básicos + stats + historial +
+  // próximas citas. Gate multi-tenant PRIMERO (404 antes de agregar nada);
+  // solo tras pasarlo se lanzan las agregaciones, cada una filtrada por
+  // businessId + clientId.
+  async getOne(businessId: string, id: string) {
+    const client = await this.prisma.client.findFirst({
+      where: { id, businessId, deletedAt: null },
+    });
+    if (!client) {
+      throw new NotFoundException('Client not found');
+    }
+
+    const [stats, appointments, upcomingAppointments, payments] =
+      await Promise.all([
+        this.computeStats(businessId, id),
+        this.getPastAppointments(businessId, id),
+        this.getUpcomingAppointments(businessId, id),
+        this.getRecentPayments(businessId, id),
+      ]);
+
+    return {
+      ...this.toDetail(client),
+      stats: {
+        ...stats,
+        // La próxima cita es la primera de la lista (orden startsAt asc).
+        nextAppointmentAt: upcomingAppointments[0]?.startsAt ?? null,
+      },
+      appointments,
+      upcomingAppointments,
+      payments,
+    };
+  }
+
+  // Stats agregadas del cliente. Dinero SIEMPRE en Decimal; el Number() se
+  // aplica solo al serializar (regla de oro).
+  private async computeStats(businessId: string, clientId: string) {
+    const [totalVisits, paidAgg, lastVisit] = await Promise.all([
+      this.prisma.appointment.count({
+        where: {
+          businessId,
+          clientId,
+          status: AppointmentStatus.COMPLETED,
+          deletedAt: null,
+        },
+      }),
+      this.prisma.payment.aggregate({
+        where: { businessId, clientId, status: PaymentStatus.PAID },
+        _sum: { finalPrice: true },
+        _count: true,
+      }),
+      this.prisma.appointment.findFirst({
+        where: {
+          businessId,
+          clientId,
+          status: AppointmentStatus.COMPLETED,
+          deletedAt: null,
+        },
+        orderBy: { startsAt: 'desc' },
+        select: { startsAt: true },
+      }),
+    ]);
+
+    const totalSpent = paidAgg._sum.finalPrice ?? new Prisma.Decimal(0);
+    const paidCount = paidAgg._count;
+    const averageTicket =
+      paidCount > 0
+        ? totalSpent
+            .div(paidCount)
+            .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+        : new Prisma.Decimal(0);
+
+    return {
+      totalVisits,
+      totalSpent: Number(totalSpent),
+      averageTicket: Number(averageTicket),
+      lastVisitAt: lastVisit?.startsAt ?? null,
+    };
+  }
+
+  private async getUpcomingAppointments(businessId: string, clientId: string) {
+    const rows = await this.prisma.appointment.findMany({
+      where: {
+        businessId,
+        clientId,
+        deletedAt: null,
+        status: { in: ACTIVE_STATUSES },
+        startsAt: { gte: new Date() },
+      },
+      orderBy: { startsAt: 'asc' },
+      take: HISTORY_LIMIT,
+      select: APPOINTMENT_SELECT,
+    });
+    return rows.map((row) => this.toAppointmentItem(row));
+  }
+
+  private async getPastAppointments(businessId: string, clientId: string) {
+    const rows = await this.prisma.appointment.findMany({
+      where: {
+        businessId,
+        clientId,
+        deletedAt: null,
+        status: { in: TERMINAL_STATUSES },
+      },
+      orderBy: { startsAt: 'desc' },
+      take: HISTORY_LIMIT,
+      select: APPOINTMENT_SELECT,
+    });
+    return rows.map((row) => this.toAppointmentItem(row));
+  }
+
+  private async getRecentPayments(businessId: string, clientId: string) {
+    const rows = await this.prisma.payment.findMany({
+      where: { businessId, clientId },
+      orderBy: { paidAt: 'desc' },
+      take: HISTORY_LIMIT,
+      select: PAYMENT_SELECT,
+    });
+    return rows.map((row) => this.toPaymentItem(row));
   }
 
   async update(businessId: string, id: string, dto: UpdateClientDto) {
@@ -105,7 +289,7 @@ export class ClientsService {
       if (error instanceof NotFoundException) throw error;
       throw this.handlePhoneConflict(error);
     }
-    return this.getOne(businessId, id);
+    return this.findBasic(businessId, id);
   }
 
   async updateVip(businessId: string, id: string, dto: UpdateClientVipDto) {
@@ -116,7 +300,7 @@ export class ClientsService {
     if (result.count === 0) {
       throw new NotFoundException('Client not found');
     }
-    return this.getOne(businessId, id);
+    return this.findBasic(businessId, id);
   }
 
   async remove(businessId: string, id: string): Promise<void> {
@@ -162,5 +346,30 @@ export class ClientsService {
 
   private toDetail(client: ClientRow) {
     return { ...this.toListItem(client), notes: client.notes };
+  }
+
+  private toAppointmentItem(row: AppointmentRow) {
+    return {
+      id: row.id,
+      startsAt: row.startsAt,
+      endsAt: row.endsAt,
+      status: row.status,
+      service: row.service,
+    };
+  }
+
+  // Importes como Number SOLO para display (regla de oro).
+  private toPaymentItem(row: PaymentRow) {
+    return {
+      id: row.id,
+      basePrice: Number(row.basePrice),
+      vipDiscountAmount: Number(row.vipDiscountAmount),
+      manualDiscountAmount: Number(row.manualDiscountAmount),
+      finalPrice: Number(row.finalPrice),
+      paymentMethod: row.paymentMethod,
+      status: row.status,
+      paidAt: row.paidAt,
+      service: row.service,
+    };
   }
 }
