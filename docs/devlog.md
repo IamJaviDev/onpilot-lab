@@ -55,9 +55,9 @@ lo cerró.
   hacerla se cierran todas de golpe.
 - [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando
   exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
-- [ ] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit),
+- [X] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit),
   historial de citas/cobros y tags por actividad (REACTIVATE/REGULAR). Ya existen
-  Appointments y Payments → plenamente accionable. _(Generado en Clients.)_
+  Appointments y Payments → plenamente accionable. _(Generado en Clients.) Cerrado el 01/07/26_
 - [ ] **Bloqueo de soft-delete de servicio con citas.** No permitir borrar un servicio
   que tenga citas asociadas. Ya existe Appointments → accionable. _(Generado en Services.)_
 - [ ] **Race teórica de solapamiento de citas.** El check+insert va en `$transaction`
@@ -80,6 +80,23 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
   para recalcular. _(Services.)_
 
 ## Asientos
+
+### 2026-07-01 — Ficha enriquecida de cliente (backend + frontend)
+
+**Qué se hizo.** Enriquecida la ficha de cliente end-to-end. Backend: ampliado GET /clients/:id (aditivo, enfoque A) para devolver además de los datos básicos: stats (totalVisits, totalSpent, averageTicket, lastVisitAt, nextAppointmentAt), historial de citas pasadas (~10), próximas citas activas (~10) y cobros recientes (~10). Frontend: sustituido el bloque "Próximamente" de /clientes/[id] por métricas + próximas citas + historial de citas + historial de cobros. Cierra la deuda "Ficha enriquecida de cliente".
+
+**Decisiones clave.**
+- Enfoque A (un solo endpoint ampliado), pero servicio MODULAR por dentro: findBasic (solo datos, usado por update/updateVip para no disparar agregaciones) separado del enriquecido (getOne público, usado por la ficha).
+- Multi-tenancy: gate findFirst con businessId → 404 ANTES de agregar nada; cada agregación filtra por businessId + clientId. Aislamiento por construcción.
+- totalVisits = citas COMPLETED. totalSpent = cobros PAID (Decimal). averageTicket = totalSpent/nº PAID con guard de 0. Regla de oro: dinero en Decimal, Number solo al serializar. Payment sin deletedAt (se filtra por estado); Appointment sí.
+- Listas separadas (próximas / historial citas / historial cobros), coherente con las secciones de la ficha. Límite 10 por lista, sin paginación.
+
+**Verificación.** lint/typecheck/build verde. Cambio aditivo (campos actuales intactos; update/updateVip usan findBasic sin agregaciones). Manual (navegador): ficha de Favian con stats reales coherentes (2 visitas, gasto 36€ = 2×18, ticket 18€, última visita 29 jun); 3 secciones con datos correctos (cancelada no cuenta como visita/gasto); ID inexistente → 404 (gate multi-tenant); listado y edición de clientes siguen OK.
+
+**Commit.** `feat(api,web): ficha enriquecida de cliente (stats + historial)`
+
+**Deuda cerrada.** ✅ Ficha enriquecida de cliente.
+**Deuda nueva.** Tags por actividad (REACTIVATE/REGULAR) — fuera de esta tarea, computeTags sigue en VIP/NEW. Cita activa vencida sin cerrar (SCHEDULED/CONFIRMED con startsAt pasado) no aparece ni en próximas ni en historial (aceptable MVP).
 
 ### 2026-06-28 — frontend Dashboard de H1 como home (/inicio)
 
