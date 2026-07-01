@@ -94,6 +94,16 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-01 — Microtareas de docs: alinear contratos y workflow con el código
+
+**Qué se hizo.** Cerradas dos inconsistencias de documentación. (1) docs/06-api-contracts.md: GET /appointments documentado como { items: [...] } → corregido a array pelado, que es lo que devuelve el código. (2) docs/10-development-workflow.md: el flujo omitía APROBACIÓN y REVISIÓN → alineado con CLAUDE.md (7 pasos), diagrama + secciones numeradas, con las descripciones de ambos pasos nuevos.
+
+**Verificación.** Diff revisado: solo docs, sin referencias cruzadas rotas por la renumeración. Sin tocar código.
+
+**Commit.** `docs: align api-contracts and workflow with code (close doc debt)`
+
+**Deuda cerrada.** ✅ Inconsistencia GET /appointments {items} vs array. ✅ Falta paso REVISIÓN en workflow (y de paso APROBACIÓN).
+
 ### 2026-07-01 — Ficha enriquecida de cliente (backend + frontend)
 
 **Qué se hizo.** Enriquecida la ficha de cliente end-to-end. Backend: ampliado GET /clients/:id (aditivo, enfoque A) para devolver además de los datos básicos: stats (totalVisits, totalSpent, averageTicket, lastVisitAt, nextAppointmentAt), historial de citas pasadas (~10), próximas citas activas (~10) y cobros recientes (~10). Frontend: sustituido el bloque "Próximamente" de /clientes/[id] por métricas + próximas citas + historial de citas + historial de cobros. Cierra la deuda "Ficha enriquecida de cliente".
