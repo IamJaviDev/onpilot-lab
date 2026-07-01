@@ -428,28 +428,29 @@ GET /appointments?from=2026-01-01&to=2026-01-07
 
 Response:
 
+El endpoint devuelve un **array pelado** de citas (no envuelto en `{ items }`),
+ordenado por `startsAt` ascendente.
+
 ```json
-{
-  "items": [
-    {
+[
+  {
+    "id": "uuid",
+    "client": {
       "id": "uuid",
-      "client": {
-        "id": "uuid",
-        "name": "Ana Pérez",
-        "phone": "600000000"
-      },
-      "service": {
-        "id": "uuid",
-        "name": "Sesión fisioterapia",
-        "basePrice": 45
-      },
-      "startsAt": "2026-01-01T10:00:00.000Z",
-      "endsAt": "2026-01-01T10:50:00.000Z",
-      "status": "CONFIRMED",
-      "source": "MANUAL"
-    }
-  ]
-}
+      "name": "Ana Pérez",
+      "phone": "600000000"
+    },
+    "service": {
+      "id": "uuid",
+      "name": "Sesión fisioterapia",
+      "basePrice": 45
+    },
+    "startsAt": "2026-01-01T10:00:00.000Z",
+    "endsAt": "2026-01-01T10:50:00.000Z",
+    "status": "CONFIRMED",
+    "source": "MANUAL"
+  }
+]
 ```
 
 Reglas:

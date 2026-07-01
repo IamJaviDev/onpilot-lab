@@ -29,7 +29,7 @@ Antes de programar, debe existir una definición clara de:
 Cada tarea debe seguir este flujo:
 
 ```txt
-SPEC → PLAN → IMPLEMENTACIÓN → CHECK → COMMIT
+SPEC → PLAN → APROBACIÓN → IMPLEMENTACIÓN → CHECK → REVISIÓN → COMMIT
 ```
 
 ---
@@ -87,7 +87,18 @@ Si el plan toca demasiados archivos o incluye cosas fuera de la fase actual, deb
 
 ---
 
-## 3. IMPLEMENTACIÓN
+## 3. APROBACIÓN
+
+El plan no se implementa hasta recibir aprobación explícita.
+
+- Ningún código se escribe antes de entregar el PLAN y recibir el visto bueno.
+- La aprobación es una frase inequívoca del tipo "Plan aprobado. Implementa
+  únicamente lo descrito".
+- Si el alcance cambia durante la aprobación, se vuelve a confirmar antes de seguir.
+
+---
+
+## 4. IMPLEMENTACIÓN
 
 La implementación debe ser pequeña y controlada.
 
@@ -104,7 +115,7 @@ Reglas:
 
 ---
 
-## 4. CHECK
+## 5. CHECK
 
 Después de implementar, ejecutar checks.
 
@@ -143,7 +154,18 @@ pnpm --filter api prisma migrate dev
 
 ---
 
-## 5. COMMIT
+## 6. REVISIÓN
+
+Antes del commit, revisar el resultado.
+
+- Repasar el diff completo: solo los archivos aprobados, sin alcance de más.
+- Confirmar que los checks se ejecutaron de verdad (no darlos por pasados).
+- Comprobar multi-tenancy, seguridad y que no se exponen datos sensibles.
+- Actualizar el devlog (`docs/devlog.md`) y la sección de deuda técnica abierta.
+
+---
+
+## 7. COMMIT
 
 Cada bloque funcional terminado debe tener un commit claro.
 
