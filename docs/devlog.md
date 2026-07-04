@@ -95,6 +95,28 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 ## Asientos
 
 
+### 2026-07-04 — Refinamiento de design tokens del frontend H1
+
+**Qué se hizo.** Refinamiento visual del frontend H1: de estética "Tailwind genérico frío" a la cálida/premium del demo (`docs/mockups/onpilot_demo.html`). Solo cosmética, cero lógica/estructura/backend. Cierra la deuda "Refinamiento de design tokens del frontend". Dividido en 3 subtareas con commit atómico + push por cada una.
+
+**Decisiones clave.**
+- Enfoque: auditoría read-only primero, luego config global (`globals.css` / `@theme`) preferida sobre edición por componente → menor superficie. La app resultó no tener clases `slate-*`/`gray-*` sueltas: todo centralizado en 6 tokens semánticos, lo que hizo el cambio quirúrgico.
+- T1 grises: remapeo de los 6 tokens semánticos (`--background/--foreground/--ink/--label/--faint/--border` → escala cálida `--bg/--g50…--g800`) + 2 hex fríos hardcodeados en TSX. `--foreground` e `--ink` unificados a `#1A1410` (antes diferían mínimamente, ambos casi-negro). `bg-white` (51 usos) intencionalmente intacto — no es gris frío.
+- T2 sombras+radios: sombras con tinte marrón (`--shsm 0 2px 8px rgba(80,40,20,.07)`, `--shmd`) vía `@theme`. Radios por bump global de escala (Estrategia A): tarjetas `rounded-xl`→18px, modales/featured `rounded-2xl`→22px; `rounded-lg` (8px) y `rounded` (4px) sin tocar. Consecuencia aceptada: inputs/textareas también a 18px (superficie mínima vs precisión). Thumb del toggle VIP a sombra cálida.
+- T3 componentes: card "Facturado" (Inicio+Caja, componente `KpiCard` compartido) con gradiente `linear-gradient(135deg,#1D9E75,#0a5c42)` + sombra verde + texto blanco 800 / label blanco/80. KPIs a `text-3xl` 800. Títulos de sección/página a 800. 5 CTAs primarios verde→negro cálido (`#1A1410`, hover `#2d2520`) en forma pastilla (`+Nueva cita`, `+Nuevo cliente`, `Crear el primero`, `Cobrar y cerrar`, `Button` compartido de submits).
+- Clasificación quirúrgica CTA-vs-acento en T3: verde marca/estado preservado (tab activo, tab de período en Caja, track del toggle VIP, badges VIP/NEW/estado, logo, `text-brand` de importes). Solo botones de acción primaria → negro.
+- Fuera de alcance (por decisión de superficie): ficha de cliente en B2 (su `StatCard` en grid de 4 col. se apretaría con números a 28px); botones secundarios (Cancelar/Editar/nav día — ya tenían borde g200).
+
+**Verificación (navegador, verificada por mí pantalla a pantalla).** Cada subtarea: lint/typecheck/build OK sin levantar servidores (Claude Code solo estático). Capturas de Inicio/Agenda/Clientes/Caja + modal por cada subtarea antes de aprobar commit. T3 confirmado: gradiente diagonal correcto, KPIs con presencia, CTAs negros pastilla, ningún verde de marca/estado convertido a negro por error.
+
+**Commits (en origin/main).**
+- `style(web): warm gray scale (design tokens 1/3)`
+- `style(web): warm shadows + generous radii (design tokens 2/3)`
+- `style(web): KPI gradient, weight contrast, dark CTAs (design tokens 3/3)`
+
+**Deuda cerrada.** ✅ Refinamiento de design tokens del frontend.
+**Deuda nueva (menor, no bloqueante).** Nav de agenda (flechas prev/next/Hoy) a 8px mientras las tarjetas subieron a 18px — se ve bien, no ajustado; reevaluar si molesta. `bg-white` (51 usos) blanco puro sobre fondo cálido — funciona con las sombras de T2; pasar a `--g50` si en algún punto canta. Ficha de cliente sin tipografía KPI 800 (grid de 4 col.) — unificar si canta. Botones secundarios sin restylear.
+
 ### 2026-07-04 — Rate limiting en Auth (@nestjs/throttler)
 
 **Qué se hizo.** Añadido rate limiting por IP en los endpoints de autenticación con @nestjs/throttler, para frenar fuerza bruta y abuso de registro. Cierra la deuda "Rate limiting en Auth". Backend puro.
