@@ -22,6 +22,17 @@
   --label: var(--g500); /* gris labels (cálido) */
   --faint: var(--g400); /* gris tenue (nav inactiva, cálido) */
   --border: var(--g200); /* borde 0.5px del mockup (cálido) */
+
+  /* Sombras cálidas (tinte marrón, no negro) — mockup líneas 18-19. */
+  --shsm: 0 2px 8px rgba(80, 40, 20, 0.07); /* tarjetas, cards, KPIs */
+  --shmd: 0 6px 20px rgba(80, 40, 20, 0.1); /* modales, elevados */
+
+  /* Radios generosos — mockup línea 17. */
+  --rsm: 12px; /* inputs, iconos, contenedores pequeños */
+  --rmd: 14px; /* textareas, cajas de contenido */
+  --rlg: 18px; /* tarjetas, cards de KPI */
+  --rxl: 22px; /* cards destacadas, modales */
+  --rpill: 100px; /* tags, badges, botones (pastilla) */
 }
 
 @theme inline {
@@ -35,6 +46,15 @@
   --color-faint: var(--faint);
   --color-border: var(--border);
   --font-sans: var(--font-dm-sans);
+
+  /* Sombras cálidas: shadow-sm (tarjetas), shadow-md (elevados). */
+  --shadow-sm: var(--shsm);
+  --shadow-md: var(--shmd);
+
+  /* Radios: solo se mueven tarjetas (xl→18) y destacadas/modales (2xl→22).
+     rounded-lg (8px) y rounded (4px) se dejan en su valor por defecto. */
+  --radius-xl: var(--rlg);
+  --radius-2xl: var(--rxl);
 }
 
 body {

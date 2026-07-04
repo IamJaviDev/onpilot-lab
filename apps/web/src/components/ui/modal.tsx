@@ -35,7 +35,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-md rounded-2xl border border-border bg-white p-6 shadow-lg"
+        className="w-full max-w-md rounded-2xl border border-border bg-white p-6 shadow-md"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-4 text-lg font-semibold text-ink">{title}</h2>
