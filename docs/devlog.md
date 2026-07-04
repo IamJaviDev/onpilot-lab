@@ -48,11 +48,11 @@ lo cerró.
   (ConfigModule) cuando haya más configuración que gestionar. _(Generado en Tarea 4. Cerrado en Auth-2.)_
 - [ ] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro.
   Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
-- [ ] **AuditLog transversal.** Auditar acciones según 08-security: login/logout
+- [X] **AuditLog transversal.** Auditar acciones según 08-security: login/logout
   _(Auth-1)_, create/edit/VIP/delete de clientes _(Clients)_, create/edit de servicios
   _(Services)_, create/edit/cancel/no-show de citas _(Appointments)_, create y mark-error
   de cobros _(Payments)_. Se difiere todo a una única tarea de auditoría transversal; al
-  hacerla se cierran todas de golpe.
+  hacerla se cierran todas de golpe. _update devlog (AuditLog) + cierra deuda transversal CERRADO_ 
 - [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando
   exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
 - [X] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit),
@@ -93,6 +93,25 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
   para recalcular. _(Services.)_
 
 ## Asientos
+
+### 2026-07-04 — AuditLog transversal (solo escritura)
+
+**Qué se hizo.** Implementado el registro de auditoría para las 16 acciones de H1. El modelo AuditLog existía desde la Tarea 1 pero nadie escribía en él; ahora cada acción relevante deja rastro. Cierra la deuda transversal de auditoría (7 fuentes: auth, clientes, servicios, citas, cobros). Solo escritura — la consulta/lectura queda diferida (acoplada al futuro RolesGuard).
+
+**Decisiones clave.**
+- AuditService central en AuditModule @Global (patrón PrismaModule). record() escribe el log en try/catch que NUNCA lanza (loguea el error con el Logger de Nest, sin incluir metadata en el mensaje).
+- Emitido desde el CONTROLLER (tras resolver el service), NO desde el service: así queda fuera del $transaction por construcción → post-commit y no-bloqueante garantizados sin tocar la lógica transaccional. Evita reescribir firmas de ~15 métodos de servicio.
+- Solo se audita la acción efectiva: si el service lanza (404/409/validación), el await corta antes del record → no hay log de acciones que no ocurrieron.
+- @AuditMeta() param-decorator para ip/userAgent (DRY, no acopla AuditService a Express). audit.actions.ts con constantes (evita typos en 16 sitios). Formato action = entidad.accion (client.create, service.delete, payment.mark_error, auth.login...).
+- Multi-tenancy: businessId del backend (@BusinessId), null en auth login/logout. Logout resuelve userId del refresh token (decisión 3b), sin registrar el token. Services delete INCLUIDO (borrado auditable). metadata mínima no sensible (VIP: {isVip,%}; cancel/mark-error: {reason}).
+- Seguridad: nunca contraseñas, tokens/hashes, secrets ni datos clínicos en el log.
+
+**Verificación (server real + curl + psql).** lint/typecheck/build OK. 18 filas en AuditLog, una por acción, con businessId/userId/action/resourceType/resourceId correctos. businessId NULL solo en auth. metadata solo con datos de gestión, sin secretos. Endpoints responden igual que antes (201/204/409). Acción fallida (409 teléfono duplicado) NO deja log. NO-BLOQUEO verificado renombrando la tabla AuditLog: con el log roto, client.create persiste el cliente igual y el fallo se captura sin propagar. Tabla restaurada.
+
+**Commit.** `feat(api): AuditLog transversal de escritura para acciones de H1 (...)`
+
+**Deuda cerrada.** ✅ AuditLog transversal (las 5 fuentes: Auth, Clients, Services, Appointments, Payments).
+**Deuda nueva.** Consulta/lectura de AuditLog (endpoint GET + pantalla) — diferida, acoplada al futuro RolesGuard. Acciones auditables fuera de H1 (register-business, refresh, cambio de password, gestión de herramientas, backoffice) — cuando existan esas features.
 
 ### 2026-07-01 — Microtareas de docs: alinear contratos y workflow con el código
 
