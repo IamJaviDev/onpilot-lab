@@ -1,16 +1,27 @@
 @import "tailwindcss";
 
 :root {
+  /* Escala de grises cálidos (tostados) — fuente de verdad:
+     docs/mockups/onpilot_demo.html líneas 11-13. */
+  --bg: #f5f0eb; /* fondo de página */
+  --g50: #faf7f4; /* fondo tarjetas/inputs/hover */
+  --g100: #f0ebe3; /* separadores suaves */
+  --g200: #e2d9d0; /* bordes principales, dividers */
+  --g300: #c8bdb2; /* bordes hover, iconos inactivos */
+  --g400: #9e9189; /* texto muted, labels, placeholders */
+  --g500: #6b6260; /* texto secundario, subtítulos */
+  --g800: #1a1410; /* texto primario, títulos */
+
   /* Marca Onpilot */
-  --background: #f8f8f6; /* crema */
-  --foreground: #1f2421;
+  --background: var(--bg); /* crema cálida */
+  --foreground: var(--g800);
   --brand: #1d9e75; /* verde */
   --brand-hover: #178a65;
   --brand-strong: #0f6e56; /* verde oscuro (hover mockup) */
-  --ink: #1a1a1a; /* texto fuerte mockup */
-  --label: #6b7280; /* gris labels */
-  --faint: #9ca3af; /* gris tenue (nav inactiva) */
-  --border: #e5e7eb; /* borde 0.5px del mockup */
+  --ink: var(--g800); /* texto fuerte mockup */
+  --label: var(--g500); /* gris labels (cálido) */
+  --faint: var(--g400); /* gris tenue (nav inactiva, cálido) */
+  --border: var(--g200); /* borde 0.5px del mockup (cálido) */
 }
 
 @theme inline {

@@ -24,7 +24,7 @@ export const STATUS_STYLES: Record<AppointmentStatus, StatusStyle> = {
     // En esta app COMPLETED solo se alcanza al cobrar → "Cobrada" de cara al
     // usuario (el estado backend sigue siendo COMPLETED).
     label: "Cobrada",
-    badge: "bg-[#F3F4F6] text-[#4B5563]",
+    badge: "bg-[#F0EBE3] text-[#6B6260]",
     dimmed: false,
   },
   CANCELLED: {

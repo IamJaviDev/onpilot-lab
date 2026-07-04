@@ -20,7 +20,7 @@ export function AppointmentCard({
     <button
       type="button"
       onClick={() => onSelect(appointment)}
-      className={`flex w-full items-center gap-3 rounded-xl border border-border bg-white px-3 py-2.5 text-left transition hover:border-[#D1D5DB] hover:bg-background ${
+      className={`flex w-full items-center gap-3 rounded-xl border border-border bg-white px-3 py-2.5 text-left transition hover:border-[#C8BDB2] hover:bg-background ${
         status.dimmed ? "opacity-40" : ""
       }`}
     >
