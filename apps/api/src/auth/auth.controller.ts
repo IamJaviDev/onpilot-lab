@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AUDIT_ACTIONS, AUDIT_RESOURCES } from '../audit/audit.actions';
 import {
@@ -30,6 +31,7 @@ import {
 import { AuthService } from './auth.service';
 import { CurrentBusiness } from './decorators/current-business.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { AUTH_THROTTLE } from './auth.throttle';
 import { LoginDto } from './dto/login.dto';
 import { RegisterBusinessDto } from './dto/register-business.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -43,6 +45,8 @@ export class AuthController {
   ) {}
 
   @Post('register-business')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: AUTH_THROTTLE.register })
   async registerBusiness(
     @Body() dto: RegisterBusinessDto,
     @Res({ passthrough: true }) res: Response,
@@ -54,6 +58,8 @@ export class AuthController {
   }
 
   @Post('login')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: AUTH_THROTTLE.login })
   @HttpCode(HttpStatus.OK)
   async login(
     @Body() dto: LoginDto,
@@ -85,6 +91,8 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: AUTH_THROTTLE.refresh })
   @HttpCode(HttpStatus.OK)
   async refresh(
     @Req() req: Request,
