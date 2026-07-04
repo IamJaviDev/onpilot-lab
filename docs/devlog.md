@@ -95,6 +95,27 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 ## Asientos
 
 
+### 2026-07-04 — Vista semanal de Agenda (H1 frontend)
+
+**Qué se hizo.** Añadida navegación semanal a la Agenda al estilo del demo: barra de semana + tabs de día (Lun–Dom) + lista de citas del día seleccionado. Sustituye la vista de un-día-con-flechas por una capa semanal encima de la lista existente. Solo frontend, cero backend (la API ya soporta rango `from&to`). Segunda tarea del plan de mejora del frontend tras el refinamiento de design tokens.
+
+**Decisiones clave.**
+- Envolver, no duplicar: se evolucionó `AgendaForZone` in situ (cambia solo la estrategia de fetch día→semana + se añade barra semanal y tabs). Lista, estados, modales y wrappers (crear/detalle/editar/cobrar/cancelar/no-show) reutilizados verbatim. `AgendaView` (guard de zona) intacto.
+- Fetch semanal: una sola query `useAppointmentsList(weekBounds(weekAnchor, zone))` trae los 7 días; cambiar de día NO refetchea (filtrado en memoria vía `useMemo` → `Map<dayISO, Appointment[]>`). Las mutaciones invalidan `appointmentKeys.all` → la vista semanal se refresca sola.
+- Estado local: `weekAnchor` + `selectedDay` + `modal` (ModalState igual que antes). Default de día seleccionado: hoy si la semana visible lo contiene, si no el lunes.
+- Helpers de semana en `lib/appointments/day-range.ts` (co-localizados con `dayBounds`, zona-negocio + DST-safe, semana ISO lunes→domingo), NO en `lib/period.ts` (que está anclado a `now()` y lo usan Caja/Dashboard — se dejó intacto). Nuevos: `weekBounds`, `weekDays`, `shiftWeek`, `formatWeekRange` (contempla semana cruzando mes: "29 Jun — 5 Jul 2026"), `selectedDayForWeek`, `dayTabLabel`.
+- Punto indicador bajo cada tab = día con ≥1 cita NO cancelada. Las canceladas siguen apareciendo en la lista al pinchar el día, solo se excluyen del indicador.
+- WeekNav y DayTabs en archivos separados (no inline) por modularidad; botón "Hoy" deshabilitado en la semana actual.
+- Rejilla read-only: pinchar card → modal detalle/editar existente. "+ Nueva cita" → modal crear existente. Cero UI de creación/edición nueva.
+
+**Verificación (navegador, verificada por mí).** lint/typecheck/build OK sin levantar servidores. Confirmado con capturas: barra semanal con rango cruzando mes ("29 Jun — 5 Jul 2026"), tabs con puntos en días con citas (Lun–Vie con punto, Sáb–Dom sin), "Hoy" deshabilitado en semana actual, día vacío ("Sin citas este día"), día con citas (Lun 29: Favian 11:00 + Juan 13:00, cards reutilizadas con badge de estado), selección por defecto en hoy, filtrado por día instantáneo (en memoria).
+
+**Archivos.** 2 nuevos (`agenda/week-nav.tsx`, `agenda/day-tabs.tsx`), 2 modificados (`agenda/agenda-view.tsx`, `lib/appointments/day-range.ts`). Cero backend, cero cambios en modales/mutaciones, `lib/period.ts` intacto.
+
+**Commit.** `feat(web): vista semanal de agenda con navegación por semana y tabs de día`
+
+**Deuda nueva (menor).** Se eliminó el `input[type=date]` de salto rápido a fecha arbitraria (lo suplen nav semanal + tabs, como el demo). Con solo flechas ±semana, llegar a una fecha lejana exige varios clics. Reintroducible después con un date-picker que lleve a la semana+día correspondiente si se echa en falta.
+
 ### 2026-07-04 — Refinamiento de design tokens del frontend H1
 
 **Qué se hizo.** Refinamiento visual del frontend H1: de estética "Tailwind genérico frío" a la cálida/premium del demo (`docs/mockups/onpilot_demo.html`). Solo cosmética, cero lógica/estructura/backend. Cierra la deuda "Refinamiento de design tokens del frontend". Dividido en 3 subtareas con commit atómico + push por cada una.
