@@ -12,6 +12,12 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
+import { AUDIT_ACTIONS, AUDIT_RESOURCES } from '../audit/audit.actions';
+import {
+  AuditMeta as AuditMetaDecorator,
+  type AuditMeta,
+} from '../audit/decorators/audit-meta.decorator';
+import { AuditService } from '../audit/audit.service';
 import type {
   CurrentBusinessContext,
   CurrentUserContext,
@@ -33,6 +39,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly config: ConfigService,
+    private readonly audit: AuditService,
   ) {}
 
   @Post('register-business')
@@ -51,9 +58,20 @@ export class AuthController {
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
+    @AuditMetaDecorator() meta: AuditMeta,
   ) {
     const { refreshToken, ...body } = await this.authService.login(dto);
     this.setRefreshCookie(res, refreshToken);
+    // Solo se audita el login con éxito; los fallidos lanzan antes de llegar aquí.
+    await this.audit.record({
+      businessId: null,
+      userId: body.user.id,
+      action: AUDIT_ACTIONS.AUTH_LOGIN,
+      resourceType: AUDIT_RESOURCES.AUTH,
+      resourceId: body.user.id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
     return body;
   }
 
@@ -86,12 +104,25 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @AuditMetaDecorator() meta: AuditMeta,
+  ) {
     const rawRefreshToken = req.cookies?.[REFRESH_COOKIE_NAME] as
       | string
       | undefined;
-    await this.authService.logout(rawRefreshToken);
+    const { userId } = await this.authService.logout(rawRefreshToken);
     res.clearCookie(REFRESH_COOKIE_NAME, clearRefreshCookieOptions());
+    await this.audit.record({
+      businessId: null,
+      userId,
+      action: AUDIT_ACTIONS.AUTH_LOGOUT,
+      resourceType: AUDIT_RESOURCES.AUTH,
+      resourceId: userId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
   }
 
   private setRefreshCookie(res: Response, refreshToken: string): void {

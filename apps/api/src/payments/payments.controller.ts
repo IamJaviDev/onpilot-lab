@@ -9,6 +9,12 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { AUDIT_ACTIONS, AUDIT_RESOURCES } from '../audit/audit.actions';
+import { AuditService } from '../audit/audit.service';
+import {
+  AuditMeta as AuditMetaDecorator,
+  type AuditMeta,
+} from '../audit/decorators/audit-meta.decorator';
 import type { CurrentUserContext } from '../auth/auth-context.types';
 import { BusinessId } from '../auth/decorators/business-id.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -21,7 +27,10 @@ import { PaymentsService } from './payments.service';
 @Controller('payments')
 @UseGuards(JwtAuthGuard)
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get()
   list(@BusinessId() businessId: string, @Query() query: ListPaymentsQueryDto) {
@@ -29,12 +38,23 @@ export class PaymentsController {
   }
 
   @Post()
-  create(
+  async create(
     @BusinessId() businessId: string,
     @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
     @Body() dto: CreatePaymentDto,
   ) {
-    return this.paymentsService.create(businessId, user.id, dto);
+    const payment = await this.paymentsService.create(businessId, user.id, dto);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.PAYMENT_CREATE,
+      resourceType: AUDIT_RESOURCES.PAYMENT,
+      resourceId: payment.id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return payment;
   }
 
   @Get(':id')
@@ -46,11 +66,24 @@ export class PaymentsController {
   }
 
   @Patch(':id/mark-error')
-  markError(
+  async markError(
     @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MarkPaymentErrorDto,
   ) {
-    return this.paymentsService.markError(businessId, id, dto);
+    const payment = await this.paymentsService.markError(businessId, id, dto);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.PAYMENT_MARK_ERROR,
+      resourceType: AUDIT_RESOURCES.PAYMENT,
+      resourceId: id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      metadata: { reason: dto.reason },
+    });
+    return payment;
   }
 }

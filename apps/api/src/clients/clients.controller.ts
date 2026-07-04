@@ -12,7 +12,15 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { AUDIT_ACTIONS, AUDIT_RESOURCES } from '../audit/audit.actions';
+import { AuditService } from '../audit/audit.service';
+import {
+  AuditMeta as AuditMetaDecorator,
+  type AuditMeta,
+} from '../audit/decorators/audit-meta.decorator';
+import type { CurrentUserContext } from '../auth/auth-context.types';
 import { BusinessId } from '../auth/decorators/business-id.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -23,7 +31,10 @@ import { UpdateClientVipDto } from './dto/update-client-vip.dto';
 @Controller('clients')
 @UseGuards(JwtAuthGuard)
 export class ClientsController {
-  constructor(private readonly clientsService: ClientsService) {}
+  constructor(
+    private readonly clientsService: ClientsService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get()
   list(@BusinessId() businessId: string, @Query() query: ListClientsQueryDto) {
@@ -31,8 +42,23 @@ export class ClientsController {
   }
 
   @Post()
-  create(@BusinessId() businessId: string, @Body() dto: CreateClientDto) {
-    return this.clientsService.create(businessId, dto);
+  async create(
+    @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
+    @Body() dto: CreateClientDto,
+  ) {
+    const client = await this.clientsService.create(businessId, dto);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.CLIENT_CREATE,
+      resourceType: AUDIT_RESOURCES.CLIENT,
+      resourceId: client.id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return client;
   }
 
   @Get(':id')
@@ -44,29 +70,68 @@ export class ClientsController {
   }
 
   @Patch(':id')
-  update(
+  async update(
     @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateClientDto,
   ) {
-    return this.clientsService.update(businessId, id, dto);
+    const client = await this.clientsService.update(businessId, id, dto);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.CLIENT_UPDATE,
+      resourceType: AUDIT_RESOURCES.CLIENT,
+      resourceId: id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return client;
   }
 
   @Patch(':id/vip')
-  updateVip(
+  async updateVip(
     @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateClientVipDto,
   ) {
-    return this.clientsService.updateVip(businessId, id, dto);
+    const client = await this.clientsService.updateVip(businessId, id, dto);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.CLIENT_VIP_UPDATE,
+      resourceType: AUDIT_RESOURCES.CLIENT,
+      resourceId: id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+      metadata: {
+        isVip: dto.isVip,
+        vipDiscountPercent: dto.vipDiscountPercent,
+      },
+    });
+    return client;
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(
+  async remove(
     @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.clientsService.remove(businessId, id);
+    await this.clientsService.remove(businessId, id);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.CLIENT_DELETE,
+      resourceType: AUDIT_RESOURCES.CLIENT,
+      resourceId: id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
   }
 }

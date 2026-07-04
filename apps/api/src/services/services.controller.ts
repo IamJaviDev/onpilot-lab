@@ -12,7 +12,15 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { AUDIT_ACTIONS, AUDIT_RESOURCES } from '../audit/audit.actions';
+import { AuditService } from '../audit/audit.service';
+import {
+  AuditMeta as AuditMetaDecorator,
+  type AuditMeta,
+} from '../audit/decorators/audit-meta.decorator';
+import type { CurrentUserContext } from '../auth/auth-context.types';
 import { BusinessId } from '../auth/decorators/business-id.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { ListServicesQueryDto } from './dto/list-services-query.dto';
@@ -22,7 +30,10 @@ import { ServicesService } from './services.service';
 @Controller('services')
 @UseGuards(JwtAuthGuard)
 export class ServicesController {
-  constructor(private readonly servicesService: ServicesService) {}
+  constructor(
+    private readonly servicesService: ServicesService,
+    private readonly audit: AuditService,
+  ) {}
 
   @Get()
   list(@BusinessId() businessId: string, @Query() query: ListServicesQueryDto) {
@@ -30,8 +41,23 @@ export class ServicesController {
   }
 
   @Post()
-  create(@BusinessId() businessId: string, @Body() dto: CreateServiceDto) {
-    return this.servicesService.create(businessId, dto);
+  async create(
+    @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
+    @Body() dto: CreateServiceDto,
+  ) {
+    const service = await this.servicesService.create(businessId, dto);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.SERVICE_CREATE,
+      resourceType: AUDIT_RESOURCES.SERVICE,
+      resourceId: service.id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return service;
   }
 
   @Get(':id')
@@ -43,20 +69,43 @@ export class ServicesController {
   }
 
   @Patch(':id')
-  update(
+  async update(
     @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateServiceDto,
   ) {
-    return this.servicesService.update(businessId, id, dto);
+    const service = await this.servicesService.update(businessId, id, dto);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.SERVICE_UPDATE,
+      resourceType: AUDIT_RESOURCES.SERVICE,
+      resourceId: id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+    return service;
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(
+  async remove(
     @BusinessId() businessId: string,
+    @CurrentUser() user: CurrentUserContext,
+    @AuditMetaDecorator() meta: AuditMeta,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    return this.servicesService.remove(businessId, id);
+    await this.servicesService.remove(businessId, id);
+    await this.audit.record({
+      businessId,
+      userId: user.id,
+      action: AUDIT_ACTIONS.SERVICE_DELETE,
+      resourceType: AUDIT_RESOURCES.SERVICE,
+      resourceId: id,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
   }
 }

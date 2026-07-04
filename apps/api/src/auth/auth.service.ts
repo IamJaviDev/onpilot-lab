@@ -208,17 +208,26 @@ export class AuthService {
     return { accessToken, refreshToken: rawToken };
   }
 
-  async logout(rawRefreshToken: string | undefined): Promise<void> {
+  async logout(
+    rawRefreshToken: string | undefined,
+  ): Promise<{ userId: string | null }> {
     // Sin cookie no hay nada que revocar: logout idempotente.
     if (!rawRefreshToken) {
-      return;
+      return { userId: null };
     }
     const tokenHash = this.hashToken(rawRefreshToken);
+    // Resolvemos el userId (aunque el token ya estuviese revocado) para poder
+    // auditar el logout; nunca se registra el token ni su hash.
+    const record = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash },
+      select: { userId: true },
+    });
     // Idempotente: no distingue si el token existía o ya estaba revocado.
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    return { userId: record?.userId ?? null };
   }
 
   private async issueTokens(user: TokenUser) {
