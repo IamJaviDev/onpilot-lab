@@ -95,6 +95,28 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 ## Asientos
 
 
+### 2026-07-04 — H2 Tarea 1: Schema de mensajería (Conversation + Message)
+
+**Qué se hizo.** Primera tarea de H2 (WhatsApp Automático): cimiento de datos de mensajería. Entidades `Conversation` y `Message` + 3 enums (`ConversationStatus`, `MessageDirection`, `MessageAuthor`), migración `20260704210601_init_h2_messaging` con SQL manual para invariantes no expresables en Prisma (patrón `init_h1`). Solo schema+migración: cero controllers/services/endpoints/frontend. Documento de feature: `docs/features/h2-whatsapp-automatico.md`.
+
+**Decisiones clave.**
+- Reglas de oro de H1 aplicadas: `businessId` en ambas entidades, UUID v7 (`uuid(7)` verificado en ambos modelos), UTC, soft delete.
+- `businessId` denormalizado en `Message` (además de en `Conversation`) a propósito: filtro multi-tenant directo sin join + habilita el índice de idempotencia por negocio.
+- `clientId` nullable en `Conversation`: puede escribir un desconocido que aún no es cliente.
+- Invariantes en SQL manual (append a la migración autogenerada):
+  - Idempotencia de webhook: único parcial `(businessId, waMessageId)` WHERE `waMessageId IS NOT NULL AND deletedAt IS NULL` (Meta reintenta webhooks).
+  - Una conversación abierta por teléfono/negocio: único parcial `(businessId, phone)` WHERE `status <> 'CLOSED' AND deletedAt IS NULL` — simplifica el webhook (T2): mensaje entrante → buscar la abierta o crearla. Las CLOSED se acumulan como historial.
+  - CHECK coherencia dirección/autor: `IN`→`CLIENT`, `OUT`→`BOT|HUMAN`.
+  - Índices de consulta: `Conversation(businessId,status,lastMessageAt)` (lista del panel), `Message(conversationId,createdAt)` (hilo).
+- `onDelete: Restrict` en TODAS las FKs, incluida Message→Conversation. Razón: el proyecto usa soft delete (un Cascade nunca se dispararía legítimamente) y los mensajes son material de auditoría — un DELETE físico accidental debe fallar ruidosamente, no llevarse el hilo en silencio.
+- `BotConfig` diferido a la Tarea 4 (BotEngine), donde habrá contexto para decidir entidad propia vs campos en Business.
+
+**Verificación (psql, pruebas en transacción con rollback — 0 filas persistidas).** lint/typecheck/build OK, migración aplicada ("in sync"). `\d` de ambas tablas correcto (defaults, text, jsonb, FKs RESTRICT). Los 2 únicos parciales presentes con su WHERE + el CHECK. Pruebas de invariantes en ambas direcciones: IN+BOT falla (CHECK) / IN+CLIENT y OUT+HUMAN pasan; waMessageId duplicado mismo negocio falla (idempotencia); 2ª conversación BOT_ACTIVE mismo (business,phone) falla / tras cerrar la 1ª (CLOSED) pasa. H1 intacto (diff = solo relaciones inversas Business/Client + realineado de espacios).
+
+**Commit.** `feat(api): schema de mensajería H2 (Conversation, Message) con invariantes SQL`
+
+**Deuda nueva.** `docs/05-database-model.md` desfasado: describe un diseño PREVIO de mensajería distinto al construido (externalPhone/senderType/INBOUND-OUTBOUND/channel; sin waMessageId/contextSummary/businessId denormalizado). No es "faltan tablas" sino "diseño descartado documentado" — peor que incompleto. Alinear en microtarea de docs aparte, pronto. Al hacerla, decidir si `channel` (del diseño viejo) vuelve al schema en v2 multicanal o se queda como concepto del WhatsAppAdapter.
+
 ### 2026-07-04 — Vista semanal de Agenda (H1 frontend)
 
 **Qué se hizo.** Añadida navegación semanal a la Agenda al estilo del demo: barra de semana + tabs de día (Lun–Dom) + lista de citas del día seleccionado. Sustituye la vista de un-día-con-flechas por una capa semanal encima de la lista existente. Solo frontend, cero backend (la API ya soporta rango `from&to`). Segunda tarea del plan de mejora del frontend tras el refinamiento de design tokens.
