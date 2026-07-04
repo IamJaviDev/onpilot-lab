@@ -28,6 +28,10 @@ function toUtcInstant(dt: DateTime): string {
   return value;
 }
 
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 /** Día natural de hoy ("YYYY-MM-DD") en la zona del negocio. */
 export function todayInZone(zone: string): string {
   return toIsoDate(DateTime.now().setZone(zone));
@@ -110,4 +114,77 @@ export function nextRoundTime(zone: string): { day: string; time: string } {
     .plus({ hours: 1 })
     .startOf("hour");
   return { day: toIsoDate(dt), time: dt.toFormat("HH:mm") };
+}
+
+// --- Semana (vista semanal de la agenda) ---
+//
+// La "semana" es lunes→domingo en la zona del negocio (semana ISO de luxon,
+// correcta para España), DST-safe. `anchorISO` es cualquier día natural dentro
+// de la semana; los helpers derivan de él los límites/días de esa semana.
+
+/** Límites [from, to] de la semana que contiene `anchorISO`, como UTC ISO. */
+export function weekBounds(
+  anchorISO: string,
+  zone: string,
+): { from: string; to: string } {
+  const anchor = DateTime.fromISO(anchorISO, { zone });
+  return {
+    from: toUtcInstant(anchor.startOf("week")),
+    to: toUtcInstant(anchor.endOf("week")),
+  };
+}
+
+/** Los 7 días ("YYYY-MM-DD") de la semana, de lunes a domingo. */
+export function weekDays(anchorISO: string, zone: string): string[] {
+  const monday = DateTime.fromISO(anchorISO, { zone }).startOf("week");
+  return Array.from({ length: 7 }, (_, i) =>
+    toIsoDate(monday.plus({ days: i })),
+  );
+}
+
+/** Desplaza `delta` semanas (en la zona del negocio). */
+export function shiftWeek(
+  anchorISO: string,
+  delta: number,
+  zone: string,
+): string {
+  return toIsoDate(DateTime.fromISO(anchorISO, { zone }).plus({ weeks: delta }));
+}
+
+/** Día seleccionado por defecto: hoy si la semana lo contiene; si no, el lunes. */
+export function selectedDayForWeek(anchorISO: string, zone: string): string {
+  const today = todayInZone(zone);
+  const days = weekDays(anchorISO, zone);
+  return days.includes(today) ? today : days[0];
+}
+
+/**
+ * Etiqueta legible del rango semanal, p. ej. "8 — 14 Julio 2026". Contrae el
+ * mes/año compartidos; si cruza mes o año, muestra ambos ("28 Jun — 4 Jul 2026").
+ */
+export function formatWeekRange(anchorISO: string, zone: string): string {
+  const monday = DateTime.fromISO(anchorISO, { zone })
+    .startOf("week")
+    .setLocale("es");
+  const sunday = monday.endOf("week");
+
+  if (monday.hasSame(sunday, "month")) {
+    return `${monday.day} — ${sunday.day} ${capitalize(monday.toFormat("LLLL"))} ${monday.year}`;
+  }
+  if (monday.hasSame(sunday, "year")) {
+    return `${monday.day} ${capitalize(monday.toFormat("LLL"))} — ${sunday.day} ${capitalize(sunday.toFormat("LLL"))} ${sunday.year}`;
+  }
+  return `${monday.day} ${capitalize(monday.toFormat("LLL"))} ${monday.year} — ${sunday.day} ${capitalize(sunday.toFormat("LLL"))} ${sunday.year}`;
+}
+
+/** Nombre corto + número de día para un tab, p. ej. { name: "Lun", num: "8" }. */
+export function dayTabLabel(
+  dayISO: string,
+  zone: string,
+): { name: string; num: string } {
+  const dt = DateTime.fromISO(dayISO, { zone }).setLocale("es");
+  return {
+    name: capitalize(dt.toFormat("ccc").replace(/\.$/, "")),
+    num: dt.toFormat("d"),
+  };
 }

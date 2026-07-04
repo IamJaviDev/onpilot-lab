@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useSession } from "@/lib/auth/session-context";
@@ -12,13 +12,14 @@ import {
   useUpdateAppointment,
 } from "@/lib/appointments/queries";
 import {
-  dayBounds,
-  formatDayLabel,
-  isToday,
+  formatWeekRange,
   nextRoundTime,
-  shiftDay,
+  selectedDayForWeek,
+  shiftWeek,
   splitInstant,
   todayInZone,
+  weekBounds,
+  weekDays,
 } from "@/lib/appointments/day-range";
 import type { Appointment } from "@/lib/appointments/types";
 import { AppointmentCard } from "./appointment-card";
@@ -26,6 +27,8 @@ import { AppointmentDetail } from "./appointment-detail";
 import { AppointmentForm } from "./appointment-form";
 import { AppointmentCharge } from "./appointment-charge";
 import { CancelAppointmentDialog } from "./cancel-appointment-dialog";
+import { DayTabs } from "./day-tabs";
+import { WeekNav } from "./week-nav";
 
 export function AgendaView() {
   const { activeBusiness } = useSession();
@@ -53,17 +56,62 @@ type ModalState =
   | { type: "cancel"; appointment: Appointment }
   | { type: "noshow"; appointment: Appointment };
 
-/** Separado para inicializar el día una vez conocida la zona del negocio. */
+/** Separado para inicializar la semana una vez conocida la zona del negocio. */
 function AgendaForZone({ zone }: { zone: string }) {
-  const [day, setDay] = useState(() => todayInZone(zone));
+  // `weekAnchor` = día cualquiera dentro de la semana visible; `selectedDay` =
+  // día cuya lista se muestra. Ambos arrancan en hoy (zona negocio).
+  const [weekAnchor, setWeekAnchor] = useState(() => todayInZone(zone));
+  const [selectedDay, setSelectedDay] = useState(() => todayInZone(zone));
   const [modal, setModal] = useState<ModalState>({ type: "none" });
 
-  const range = useMemo(() => dayBounds(day, zone), [day, zone]);
+  // Una sola query trae los 7 días de la semana; la key es el rango semanal, así
+  // que cambiar de semana refetchea y cambiar de día NO.
+  const range = useMemo(() => weekBounds(weekAnchor, zone), [weekAnchor, zone]);
   const query = useAppointmentsList(range);
 
-  const items = query.data ?? [];
-  const onToday = isToday(day, zone);
+  const days = useMemo(() => weekDays(weekAnchor, zone), [weekAnchor, zone]);
+  const items = useMemo(() => query.data ?? [], [query.data]);
+
+  // Agrupa las citas de la semana por día (zona negocio), cada grupo ordenado
+  // por hora. La lista del día seleccionado se filtra de aquí, sin refetch.
+  const groups = useMemo(() => {
+    const map = new Map<string, Appointment[]>();
+    for (const appt of items) {
+      const key = splitInstant(appt.startsAt, zone).day;
+      const list = map.get(key);
+      if (list) list.push(appt);
+      else map.set(key, [appt]);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    }
+    return map;
+  }, [items, zone]);
+
+  // Punto indicador: solo días con ≥1 cita NO cancelada.
+  const daysWithAppointments = useMemo(() => {
+    const set = new Set<string>();
+    for (const appt of items) {
+      if (appt.status === "CANCELLED") continue;
+      set.add(splitInstant(appt.startsAt, zone).day);
+    }
+    return set;
+  }, [items, zone]);
+
+  const dayItems = groups.get(selectedDay) ?? [];
+  const isCurrentWeek = days[0] === weekDays(todayInZone(zone), zone)[0];
   const close = () => setModal({ type: "none" });
+
+  const goWeek = (delta: number) => {
+    const nextAnchor = shiftWeek(weekAnchor, delta, zone);
+    setWeekAnchor(nextAnchor);
+    setSelectedDay(selectedDayForWeek(nextAnchor, zone));
+  };
+  const goToday = () => {
+    const today = todayInZone(zone);
+    setWeekAnchor(today);
+    setSelectedDay(today);
+  };
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-6">
@@ -79,54 +127,31 @@ function AgendaForZone({ zone }: { zone: string }) {
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setDay((d) => shiftDay(d, -1, zone))}
-          aria-label="Día anterior"
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-white text-label transition hover:bg-background"
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setDay((d) => shiftDay(d, 1, zone))}
-          aria-label="Día siguiente"
-          className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-white text-label transition hover:bg-background"
-        >
-          <ChevronRight size={18} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setDay(todayInZone(zone))}
-          disabled={onToday}
-          className="rounded-lg border border-border bg-white px-3 py-2 text-sm font-medium text-ink transition hover:bg-background disabled:opacity-50"
-        >
-          Hoy
-        </button>
-        <input
-          type="date"
-          value={day}
-          onChange={(e) => {
-            if (e.target.value) setDay(e.target.value);
-          }}
-          className="ml-auto rounded-lg border border-border bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20"
-        />
-      </div>
+      <WeekNav
+        rangeLabel={formatWeekRange(weekAnchor, zone)}
+        isCurrentWeek={isCurrentWeek}
+        onPrev={() => goWeek(-1)}
+        onNext={() => goWeek(1)}
+        onToday={goToday}
+      />
 
-      <p className="text-sm font-medium text-label">
-        {formatDayLabel(day, zone)}
-      </p>
+      <DayTabs
+        days={days}
+        selectedDay={selectedDay}
+        daysWithAppointments={daysWithAppointments}
+        zone={zone}
+        onSelect={setSelectedDay}
+      />
 
       <div className="flex flex-col gap-2">
         {query.isPending ? (
           <ListSkeleton />
         ) : query.isError ? (
           <ErrorState onRetry={() => query.refetch()} />
-        ) : items.length === 0 ? (
+        ) : dayItems.length === 0 ? (
           <EmptyState />
         ) : (
-          items.map((appointment) => (
+          dayItems.map((appointment) => (
             <AppointmentCard
               key={appointment.id}
               appointment={appointment}
@@ -139,7 +164,11 @@ function AgendaForZone({ zone }: { zone: string }) {
 
       <Modal open={modal.type === "create"} onClose={close} title="Nueva cita">
         {modal.type === "create" ? (
-          <CreateAppointmentForm zone={zone} defaultDay={day} onDone={close} />
+          <CreateAppointmentForm
+            zone={zone}
+            defaultDay={selectedDay}
+            onDone={close}
+          />
         ) : null}
       </Modal>
 
