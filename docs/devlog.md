@@ -46,7 +46,7 @@ lo cerró.
   (manda `CLAUDE.md`). Microtarea de documentación. _(Detectado en Tarea 2.)_
 - [x] **ConfigModule pendiente.** Migrar de `import 'dotenv/config'` a `@nestjs/config`
   (ConfigModule) cuando haya más configuración que gestionar. _(Generado en Tarea 4. Cerrado en Auth-2.)_
-- [ ] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro.
+- [X] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro._(Deuda cerrada)_
   Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
 - [X] **AuditLog transversal.** Auditar acciones según 08-security: login/logout
   _(Auth-1)_, create/edit/VIP/delete de clientes _(Clients)_, create/edit de servicios
@@ -93,6 +93,24 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
   para recalcular. _(Services.)_
 
 ## Asientos
+
+
+### 2026-07-04 — Rate limiting en Auth (@nestjs/throttler)
+
+**Qué se hizo.** Añadido rate limiting por IP en los endpoints de autenticación con @nestjs/throttler, para frenar fuerza bruta y abuso de registro. Cierra la deuda "Rate limiting en Auth". Backend puro.
+
+**Decisiones clave.**
+- Ámbito solo-Auth: ThrottlerModule registrado dentro de AuthModule (no global); ThrottlerGuard aplicado por ruta solo en login/register/refresh. logout, me y H1 quedan intactos sin necesidad de @SkipThrottle (el guard ni se pone en ellos). Blast radius mínimo.
+- Límites (constantes en auth.throttle.ts, sin env vars): login 5/min, register-business 3/min, refresh 10/min (laxo — no romper bootstrap/single-flight/multi-pestaña legítimos). Ventana 60s.
+- Storage en memoria (default del throttler), suficiente para MVP monoinstancia; Redis se difiere.
+- 429 con mensaje genérico de NestJS (no filtra credenciales). El throttler cuenta por IP, no registra el body.
+
+**Verificación (curl directo a :4000).** lint/typecheck/build OK. login: 6 intentos rápidos → 5×401 + 1×429 (429 por nº de intentos, no por resultado). register: 4º → 429 (límite 3). H1 sin throttle: GET /clients ×12 sin token → 401 (nunca 429), ×8 con token → 200. Login aislado tras reset → funciona (no molesta al uso normal).
+
+**Commit.** `feat(api): rate limiting en Auth con @nestjs/throttler (login 5/min, register 3/min, refresh 10/min)`
+
+**Deuda cerrada.** ✅ Rate limiting en Auth.
+**Deuda nueva (DESTACADA).** trust proxy NO configurado: sin él, el rate limiting por IP no protege bien en producción tras el proxy (Railway) ni desde el navegador vía rewrites de Next — todas las peticiones aparentan venir de la IP del proxy (un cubo compartido). Configurar trust proxy correctamente antes de producción (hacerlo mal permite spoofing de X-Forwarded-For). No es nota menor. Además: storage del throttler en memoria (mono-instancia) → migrar a Redis si se escala a multi-instancia.
 
 ### 2026-07-04 — AuditLog transversal (solo escritura)
 
