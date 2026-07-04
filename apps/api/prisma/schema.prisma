@@ -66,6 +66,26 @@ enum PaymentStatus {
   REFUNDED
 }
 
+// --- H2 Mensajería (WhatsApp) ---
+
+enum ConversationStatus {
+  BOT_ACTIVE
+  PENDING_REVIEW
+  HUMAN_CONTROL
+  CLOSED
+}
+
+enum MessageDirection {
+  IN
+  OUT
+}
+
+enum MessageAuthor {
+  CLIENT
+  BOT
+  HUMAN
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -101,12 +121,14 @@ model Business {
   updatedAt DateTime       @updatedAt
   deletedAt DateTime?
 
-  members      BusinessMember[]
-  clients      Client[]
-  services     Service[]
-  appointments Appointment[]
-  payments     Payment[]
-  auditLogs    AuditLog[]
+  members       BusinessMember[]
+  clients       Client[]
+  services      Service[]
+  appointments  Appointment[]
+  payments      Payment[]
+  auditLogs     AuditLog[]
+  conversations Conversation[]
+  messages      Message[]
 }
 
 model BusinessMember {
@@ -137,9 +159,10 @@ model Client {
   updatedAt          DateTime  @updatedAt
   deletedAt          DateTime?
 
-  business     Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  appointments Appointment[]
-  payments     Payment[]
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  appointments  Appointment[]
+  payments      Payment[]
+  conversations Conversation[]
 
   @@index([businessId, phone])
 }
@@ -236,6 +259,57 @@ model AuditLog {
   user     User?     @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([businessId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// H2 Mensajería (WhatsApp). Mismas reglas de oro que H1: businessId en toda
+// entidad, UUID v7, UTC, soft delete. Invariantes no expresables en Prisma
+// (únicos parciales + CHECK dirección/autor) van como SQL manual en la
+// migración init_h2_messaging.
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  businessId     String             @db.Uuid
+  // Nullable: puede escribir un desconocido que aún no es cliente del negocio.
+  clientId       String?            @db.Uuid
+  // Teléfono del interlocutor (E.164 normalizado).
+  phone          String
+  status         ConversationStatus @default(BOT_ACTIVE)
+  lastMessageAt  DateTime?
+  // Resumen de conversación larga (lo generará el BotEngine en tareas futuras).
+  contextSummary String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  deletedAt      DateTime?
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  client   Client?   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  messages Message[]
+
+  @@index([businessId, status, lastMessageAt])
+}
+
+model Message {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  // businessId denormalizado a propósito: filtro multi-tenant directo sin join.
+  businessId     String           @db.Uuid
+  conversationId String           @db.Uuid
+  direction      MessageDirection
+  author         MessageAuthor
+  body           String
+  // id del mensaje en WhatsApp; clave de idempotencia (Meta reintenta webhooks).
+  waMessageId    String?
+  // tokens/coste aprox del bot, motivo de escalado, etc.
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  deletedAt      DateTime?
+
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, createdAt])
 }
 
 model RefreshToken {
