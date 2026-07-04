@@ -9,7 +9,7 @@ export function DashboardView() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-6">
-      <h1 className="text-xl font-bold text-ink">Inicio</h1>
+      <h1 className="text-xl font-extrabold text-ink">Inicio</h1>
 
       {query.isPending ? (
         <DashboardSkeleton />
@@ -51,7 +51,7 @@ function Dashboard({ data }: { data: DashboardH1 }) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-faint">
+        <h2 className="text-xs font-extrabold uppercase tracking-[0.8px] text-faint">
           Servicios top del mes
         </h2>
         <div className="overflow-hidden rounded-xl border border-border bg-white">
@@ -90,21 +90,33 @@ function KpiCard({
   return (
     <div
       className={`rounded-xl border px-4 py-3 ${
-        highlight ? "border-brand/30 bg-[#E1F5EE]" : "border-border bg-white"
+        highlight
+          ? "border-transparent bg-[linear-gradient(135deg,#1D9E75_0%,#0a5c42_100%)] shadow-[0_6px_20px_rgba(29,158,117,0.35)]"
+          : "border-border bg-white"
       }`}
     >
-      <p className="text-xs font-medium uppercase tracking-wide text-label">
+      <p
+        className={`text-xs font-bold uppercase tracking-[0.6px] ${
+          highlight ? "text-white/80" : "text-label"
+        }`}
+      >
         {label}
       </p>
       <p
-        className={`mt-1 text-xl font-bold text-ink ${
-          highlight ? "text-brand-strong" : ""
+        className={`mt-1 text-3xl font-extrabold leading-none ${
+          highlight ? "text-white" : "text-ink"
         }`}
       >
         {value}
       </p>
       {subtitle ? (
-        <p className="mt-0.5 text-xs text-faint">{subtitle}</p>
+        <p
+          className={`mt-0.5 text-xs ${
+            highlight ? "text-white/70" : "text-faint"
+          }`}
+        >
+          {subtitle}
+        </p>
       ) : null}
     </div>
   );

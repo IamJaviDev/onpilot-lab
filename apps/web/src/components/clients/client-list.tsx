@@ -36,11 +36,11 @@ export function ClientList() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-xl font-bold text-ink">Clientes</h1>
+        <h1 className="text-xl font-extrabold text-ink">Clientes</h1>
         <button
           type="button"
           onClick={() => setCreating(true)}
-          className="flex items-center gap-1.5 rounded-xl bg-brand px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover"
+          className="flex items-center gap-1.5 rounded-full bg-[#1A1410] px-3 py-2 text-sm font-bold text-white shadow-[0_4px_12px_rgba(0,0,0,0.2)] transition hover:bg-[#2d2520]"
         >
           <Plus size={16} />
           Nuevo cliente
@@ -178,7 +178,7 @@ function EmptyState({
       <button
         type="button"
         onClick={onCreate}
-        className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-hover"
+        className="rounded-full bg-[#1A1410] px-4 py-2 text-sm font-bold text-white shadow-[0_4px_12px_rgba(0,0,0,0.2)] transition hover:bg-[#2d2520]"
       >
         Crear el primero
       </button>

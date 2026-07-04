@@ -64,7 +64,7 @@ export function AppointmentDetail({
           <button
             type="button"
             onClick={onCharge}
-            className="w-full rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-hover"
+            className="w-full rounded-full bg-[#1A1410] px-4 py-3 text-sm font-bold text-white shadow-[0_4px_12px_rgba(0,0,0,0.2)] transition hover:bg-[#2d2520]"
           >
             Cobrar y cerrar
           </button>

@@ -47,7 +47,7 @@ function CashForZone({ zone }: { zone: string }) {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4 px-4 py-6">
-      <h1 className="text-xl font-bold text-ink">Caja</h1>
+      <h1 className="text-xl font-extrabold text-ink">Caja</h1>
 
       <div className="flex flex-wrap gap-2">
         {PERIOD_TABS.map((tab) => (
@@ -135,16 +135,24 @@ function KpiCard({
   return (
     <div
       className={`rounded-xl border px-4 py-3 ${
-        highlight ? "border-brand/30 bg-[#E1F5EE]" : "border-border bg-white"
+        highlight
+          ? "border-transparent bg-[linear-gradient(135deg,#1D9E75_0%,#0a5c42_100%)] shadow-[0_6px_20px_rgba(29,158,117,0.35)]"
+          : "border-border bg-white"
       }`}
     >
-      <p className="text-xs font-medium uppercase tracking-wide text-label">
+      <p
+        className={`text-xs font-bold uppercase tracking-[0.6px] ${
+          highlight ? "text-white/80" : "text-label"
+        }`}
+      >
         {label}
       </p>
       <p
-        className={`mt-1 font-bold text-ink ${
-          small ? "text-sm leading-tight" : "text-xl"
-        } ${highlight ? "text-brand-strong" : ""}`}
+        className={`mt-1 ${
+          small
+            ? "text-sm font-bold leading-tight"
+            : "text-3xl font-extrabold leading-none"
+        } ${highlight ? "text-white" : "text-ink"}`}
       >
         {value}
       </p>
@@ -161,7 +169,7 @@ function Breakdown({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-faint">
+      <h2 className="text-xs font-extrabold uppercase tracking-[0.8px] text-faint">
         {title}
       </h2>
       <div className="overflow-hidden rounded-xl border border-border bg-white">
