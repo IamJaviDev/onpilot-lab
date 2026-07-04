@@ -18,79 +18,79 @@ todo y se actualiza la sección de deuda.
 Lista viva. Cuando algo se resuelve, se marca y se mueve al asiento de la tarea que
 lo cerró.
 
-- [ ] **Inconsistencia doc: forma de GET /appointments.** `docs/06-api-contracts.md` documenta
-  la respuesta como `{ items: [...] }`, pero el código real devuelve un array pelado
-  (`Appointment[]`). Alinear el doc con el código. Microtarea de documentación.
-  _(Detectado en Agenda Pieza 1.)_
-- [ ] **Buscador de cliente en formulario de cita.** El selector de cliente usa `<select>` con
-  `limit:100` ordenado por nombre en cliente; `GET /clients` ordena por `createdAt`. Si la base
-  de clientes supera ~100, el selector se queda corto. Sustituir por input con búsqueda/
-  autocomplete cuando crezca. _(Generado en Agenda Pieza 2.)_
-- [ ] **CSRF token en Auth.** El refresh token va en cookie httpOnly con `sameSite:'strict'`,
-  que es mitigación suficiente para MVP. Si en el futuro se relaja a `lax`/`none` (p. ej. por
-  necesidades cross-site), hay que añadir un token CSRF explícito. _(Generado en frontend-auth.)_
-- [ ] **Logout en móvil (placement visual).** El shell coloca negocio + logout en una topbar
-  compacta en móvil; el placement exacto está pendiente de validación visual fina contra el
-  mockup. _(Generado en frontend layout + navegación.)_
-- [ ] **Edición de notas de cliente sin autosave.** Las notas se editan vía el modal de
-  edición, no con autosave inline como el mockup. Decisión de scope; revisar si se quiere
-  autosave más adelante. _(Generado en frontend Clientes.)_
+### Seguridad / infraestructura (antes de producción)
+- [ ] **trust proxy sin configurar (DESTACADA).** Sin `trust proxy`, el rate limiting por IP
+  no protege bien en producción tras el proxy (Railway) ni desde el navegador vía los rewrites
+  de Next: todas las peticiones aparentan venir de la IP del proxy (un cubo compartido).
+  Configurar correctamente antes de producción; hacerlo mal permite spoofing de
+  `X-Forwarded-For`. _(Generado en Rate limiting, 01/07/26.)_
+- [ ] **Storage del throttler en memoria.** Mono-instancia. Migrar a Redis si se escala a
+  multi-instancia. _(Generado en Rate limiting, 01/07/26.)_
+- [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando
+  exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
+- [ ] **Consulta/lectura de AuditLog.** Endpoint GET + pantalla para ver el historial de
+  auditoría. Diferida, acoplada al futuro RolesGuard (quién puede verla). _(Generado en AuditLog, 01/07/26.)_
+
+### Backend / datos
 - [ ] **Índice redundante de teléfono.** `Client_businessId_phone_idx` (no único,
   autogenerado del schema) está solapado por el parcial único
   `Client_businessId_phone_active_idx`. Eliminar el no-único en una futura tarea que
   toque el schema. _(Generado en Tarea 2.)_
-- [x] **Scripts de Prisma pendientes.** Añadir `prisma:migrate` y `prisma:format` al
-  `package.json` raíz. Microtarea con su propio commit. _(Generado en Tarea 2. Cerrado en Tarea 3.)_
-- [ ] **Inconsistencia entre docs.** `docs/10-development-workflow.md` lista el flujo
-  sin el paso REVISIÓN, mientras `CLAUDE.md` sí lo incluye. Alinear ambos
-  (manda `CLAUDE.md`). Microtarea de documentación. _(Detectado en Tarea 2.)_
-- [x] **ConfigModule pendiente.** Migrar de `import 'dotenv/config'` a `@nestjs/config`
-  (ConfigModule) cuando haya más configuración que gestionar. _(Generado en Tarea 4. Cerrado en Auth-2.)_
-- [X] **Rate limiting en Auth.** 08-security-rules.md pide throttling en login/registro._(Deuda cerrada)_
-  Diferido a una tarea con @nestjs/throttler. _(Generado en Auth-1.)_
-- [X] **AuditLog transversal.** Auditar acciones según 08-security: login/logout
-  _(Auth-1)_, create/edit/VIP/delete de clientes _(Clients)_, create/edit de servicios
-  _(Services)_, create/edit/cancel/no-show de citas _(Appointments)_, create y mark-error
-  de cobros _(Payments)_. Se difiere todo a una única tarea de auditoría transversal; al
-  hacerla se cierran todas de golpe. _update devlog (AuditLog) + cierra deuda transversal CERRADO_ 
-- [ ] **RolesGuard pendiente.** Autorización por rol (owner vs staff). Necesario cuando
-  exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
-- [X] **Ficha enriquecida de cliente.** Stats (totalVisits, totalSpent, lastVisit),
-  historial de citas/cobros (REACTIVATE/REGULAR). Ya existen
-  Appointments y Payments → plenamente accionable. _(Generado en Clients.) Cerrado el 01/07/26_
 - [ ] **Bloqueo de soft-delete de servicio con citas.** No permitir borrar un servicio
   que tenga citas asociadas. Ya existe Appointments → accionable. _(Generado en Services.)_
 - [ ] **Race teórica de solapamiento de citas.** El check+insert va en `$transaction`
   pero sin constraint de exclusión de Postgres (btree_gist). Para MVP es teórica; si se
   vuelve real, añadir el constraint vía migración SQL. _(Generado en Appointments.)_
 - [ ] **Cobro de importe libre sin servicio.** No soportado en MVP: todo cobro exige un
-  servicio (de la cita o explícito) como origen del basePrice. Si se necesita cobrar un
-  importe arbitrario sin servicio, decisión de producto futura. _(Generado en Payments.)_
-  - [ ] **Gráfico "facturación últimos 6 meses" (Caja/Dashboard).** Requiere serie temporal
+  servicio como origen del basePrice. Decisión de producto futura. _(Generado en Payments.)_
+- [ ] **Cita activa vencida sin cerrar.** Una cita SCHEDULED/CONFIRMED con `startsAt` ya
+  pasado no aparece ni en próximas ni en historial de la ficha. Aceptable MVP.
+  _(Generado en Ficha enriquecida, 01/07/26.)_
+
+### Frontend / UX
+- [ ] **Ficha enriquecida sin tags por actividad.** `computeTags` solo da VIP/NEW. Los tags
+  derivados de comportamiento (REACTIVATE/REGULAR) quedaron fuera. _(Generado en Ficha enriquecida, 01/07/26.)_
+- [ ] **Gráfico "facturación últimos 6 meses" (Caja/Dashboard).** Requiere serie temporal
   que ningún endpoint da (endpoint nuevo o N llamadas). _(Generado en Caja.)_
 - [ ] **"Últimas transacciones" en Caja.** Requiere GET /payments por rango; /cash/summary
   solo da agregados. _(Generado en Caja.)_
 - [ ] **Desglose del cobro en cita COMPLETED.** El detalle de una cita cobrada solo muestra
   el badge "Cobrada", no el desglose del pago (requeriría GET /payments por cita).
   _(Generado en Agenda Pieza 3.)_
-  - [ ] **Tags por actividad (REACTIVATE/REGULAR).** computeTags solo da VIP/NEW. Los tags
-  derivados de comportamiento (a reactivar, regular) quedaron fuera de la ficha enriquecida.
-  _(Generado en Ficha enriquecida, 01/07/26.)_
-- [ ] **Cita activa vencida sin cerrar.** Una cita SCHEDULED/CONFIRMED con startsAt ya pasado
-  no aparece ni en próximas ni en historial de la ficha. Aceptable MVP.
-  _(Generado en Ficha enriquecida, 01/07/26.)_
+- [ ] **Buscador de cliente en formulario de cita.** El selector usa `<select>` con
+  limit:100; si la base supera ~100, se queda corto. Sustituir por input con búsqueda
+  cuando crezca. _(Generado en Agenda Pieza 2.)_
+- [ ] **Edición de notas de cliente sin autosave.** Se editan vía modal, no inline como el
+  mockup. Decisión de scope. _(Generado en frontend Clientes.)_
+- [ ] **Logout en móvil (placement visual).** Placement exacto pendiente de validación
+  visual fina contra el mockup. _(Generado en frontend layout + navegación.)_
+- [ ] **CSRF token en Auth.** El refresh va en cookie httpOnly con `sameSite:'strict'`
+  (mitigación suficiente para MVP). Si se relaja a `lax`/`none`, añadir CSRF explícito.
+  _(Generado en frontend-auth.)_
+
+## Deuda cerrada
+
+- [x] **Scripts de Prisma.** _(Tarea 2 → Tarea 3.)_
+- [x] **ConfigModule.** _(Tarea 4 → Auth-2.)_
+- [x] **Ficha enriquecida de cliente.** Stats, historial de citas/cobros, próximas citas.
+  _(Clients → Ficha enriquecida, 01/07/26.)_
+- [x] **Inconsistencia doc: GET /appointments {items} vs array pelado.** _(Agenda P1 → microtareas docs, 01/07/26.)_
+- [x] **Inconsistencia doc: 10-development-workflow sin REVISIÓN/APROBACIÓN.** _(Tarea 2 → microtareas docs, 01/07/26.)_
+- [x] **AuditLog transversal.** Escritura de las 16 acciones (auth, clientes, servicios, citas, cobros).
+  _(5 fuentes → AuditLog, 01/07/26.)_
+- [x] **Rate limiting en Auth.** login 5/min, register 3/min, refresh 10/min. _(Auth-1 → Rate limiting, 01/07/26.)_
 
 ## Convenciones / Notas permanentes
 
 No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 - **Invariantes invisibles a Prisma.** El índice único parcial de teléfono y los 8 CHECK
-  de rango viven solo en el SQL de la migración; Prisma no los introspecta (`prisma db pull`
-  y el diff de `migrate dev` no los ven). Cualquier cambio sobre ellos se edita a mano en
-  una nueva migración. **No declarar en `schema.prisma`.** _(Tarea 2.)_
+  de rango viven solo en el SQL de la migración; Prisma no los introspecta. Cualquier cambio
+  se edita a mano en una nueva migración. **No declarar en `schema.prisma`.** _(Tarea 2.)_
 - **Convención monetaria (regla de oro).** El dinero se calcula SIEMPRE en backend con
-  Decimal; el `number` que sale en las respuestas de la API es solo para display, jamás
-  para recalcular. _(Services.)_
+  Decimal; el `number` de las respuestas de la API es solo para display, jamás para
+  recalcular. _(Services.)_
+
 
 ## Asientos
 
