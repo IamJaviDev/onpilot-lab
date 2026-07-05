@@ -94,6 +94,28 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-05 — H2 Tarea 2: Webhook de recepción de WhatsApp (verificado con mensaje real)
+
+**Qué se hizo.** Módulo `messaging` en apps/api: recepción completa Meta→BD. `WebhookController` (GET challenge + POST con firma sobre rawBody, 200 rápido, sin JwtAuthGuard — protegido por HMAC), `WebhookService` (verificación de firma delegada en util pura, parseo Cloud API, resolución de negocio por env), `ConversationService` (persistencia en $transaction: find-or-create de conversación abierta + Message IN + lastMessageAt + dedupe P2002). Sin bot, sin envío — solo recepción. Doc de setup: `docs/features/h2-webhook-setup.md`.
+
+**Decisiones clave.**
+- Firma HMAC-SHA256 sobre rawBody (`rawBody: true` en bootstrap, aditivo) con `timingSafeEqual` + guard de longitud; extraída a `signature.util.ts` (función pura, testeable sin Prisma/Nest — desviación del plan anunciada y aprobada: mejora de diseño).
+- 200 rápido e incondicional tras validar firma; errores de procesamiento → log + 200 (evitar tormenta de reintentos de Meta). Procesamiento síncrono aceptado en sandbox; service separado como línea de corte para encolar (Bull) en T7 sin tocar el controller.
+- Resolución de negocio: `metadata.phone_number_id` vs env (`WHATSAPP_PHONE_NUMBER_ID` → `WHATSAPP_BUSINESS_ID`); no coincide → warning + 200 sin persistir. Mecanismo v1-sandbox, la resolución multi-tenant real llega con registro de números por negocio.
+- Solo `type: text`; statuses y otros tipos → log e ignorar. 4 env vars WhatsApp obligatorias (fail-fast en env.validation.ts).
+- Vinculación con Client: lookup por teléfono; si el formato no casa → clientId null (seguro).
+
+**Verificación.** lint/typecheck/build/test 7/7 (HMAC con casos de header ausente/malformado). Curls locales §4: challenge OK/KO (200 challenge / 403), POST firmado → persiste, repetido → dedupe (count estable, P2002 capturado), firma inválida → 401, statuses → 200 sin persistir. **En vivo:** ngrok + callback URL + verify token en Meta → challenge verificado (GET 200 en túnel). Hallazgo: la app NO quedaba suscrita a la WABA con el toggle del panel — resuelto vía Graph API (`POST /{waba-id}/subscribed_apps` → success:true; antes solo estaba suscrita la app interna de Meta "WA DevX"). Tras suscribir: **mensaje real de WhatsApp desde el móvil → POST 200 en túnel → persistido en BD con wamid auténtico**. Recepción Meta→BD verificada de punta a punta.
+
+**Commit.** `feat(api): webhook de recepción de WhatsApp (verificación, firma, dedupe, persistencia)`
+
+**Notas operativas / deuda.**
+- ngrok free: la URL cambia en cada reinicio del túnel → actualizar callback URL en Meta cada sesión de desarrollo con webhook.
+- La suscripción app↔WABA vía Graph API es un paso de setup NO cubierto por el panel — añadido al conocimiento operativo (documentar en h2-webhook-setup.md).
+- Higiene de secretos: rotar verify token (expuesto en chat de trabajo) y regenerar el token temporal del panel (ídem). El token permanente (System User) llega en T3 — tratamiento estricto desde el inicio.
+- Deuda ya apuntada que sigue abierta: normalización de teléfonos H1↔E.164 (clientId null si no casa); 05-database-model.md desfasado.
+
+
 ### 2026-07-05 — H2: Alta en Meta for Developers + sandbox WhatsApp operativo
 
 **Qué se hizo.** Registro completo de la infraestructura Meta para H2 (sin código). Cuenta de Facebook antigua saneada (email actualizado a uno con acceso, limpieza de emails muertos, 2FA). App **Onpilot** creada en Meta for Developers con caso de uso "Conectar con los clientes a través de WhatsApp" (solo WhatsApp — Instagram/otros casos descartados a propósito: son H4 y añaden fricción de revisión). Portfolio empresarial **Onpilot** nuevo y limpio (descartados portfolios personales antiguos). Plataforma WhatsApp Business activada con integración "Integrar con API" (Cloud API directa, sin BSP — coherente con la arquitectura del doc de feature). Permisos del token: solo la cuenta de test actual (mínimo privilegio), no cuentas futuras.
