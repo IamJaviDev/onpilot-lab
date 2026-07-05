@@ -96,6 +96,6 @@ El workspace con sidebar (acordado para "cuando vayamos a H2") es prerequisito d
 - **Dependencia de Meta**: mitigada por diseño con el WhatsAppAdapter (canal como capa intercambiable). Multicanal real es v2.
 - **RGPD**: deuda DESTACADA antes de clientes reales (contrato encargado del tratamiento + cifrado en reposo).
 
-
+**Pendiente (ligado a lanzamiento, no al desarrollo).** La verificación de empresa (Paso 3) requiere entidad legal (autónomo/sociedad), que aún no existe. Sin ella no se sale del sandbox, pero el sandbox cubre TODA la Oleada 1 (5 destinatarios de prueba bastan para desarrollo y demos). Decisión de negocio: darse de alta (autónomo como opción ligera) antes de captar clientes reales — misma condición que ya impone la deuda RGPD (el contrato de encargado del tratamiento necesita entidad que firme). Añadido al criterio de lanzable de H2.
 
 

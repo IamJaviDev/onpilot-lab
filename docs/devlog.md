@@ -94,6 +94,15 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-05 — H2: Alta en Meta for Developers + sandbox WhatsApp operativo
+
+**Qué se hizo.** Registro completo de la infraestructura Meta para H2 (sin código). Cuenta de Facebook antigua saneada (email actualizado a uno con acceso, limpieza de emails muertos, 2FA). App **Onpilot** creada en Meta for Developers con caso de uso "Conectar con los clientes a través de WhatsApp" (solo WhatsApp — Instagram/otros casos descartados a propósito: son H4 y añaden fricción de revisión). Portfolio empresarial **Onpilot** nuevo y limpio (descartados portfolios personales antiguos). Plataforma WhatsApp Business activada con integración "Integrar con API" (Cloud API directa, sin BSP — coherente con la arquitectura del doc de feature). Permisos del token: solo la cuenta de test actual (mínimo privilegio), no cuentas futuras.
+
+**Sandbox verificado.** Número de prueba asignado (+1 555 025-7710), Phone Number ID y WABA ID visibles en el panel. Móvil personal añadido como destinatario de prueba y verificado por código. Mensaje de plantilla enviado desde el panel y **recibido en WhatsApp real** → tubería de envío Meta→móvil funcionando de extremo a extremo. La recepción entrante (webhook) es la Tarea 2.
+
+**Notas operativas.** El token del panel es temporal (24h) — en la Tarea 2/3 se generará uno permanente (System User); JAMÁS commitear tokens. "Hazte proveedor de tecnología" y "Publicar app" NO tocados: innecesarios para el MVP (modo desarrollo + sandbox basta). Paso 2 (número de producción + método de pago) diferido.
+
+**Pendiente (esta semana).** Iniciar la verificación de la empresa (Paso 3 / Security Centre) con la documentación del negocio — es el trámite de semanas que corre en paralelo; sin ella no se sale del sandbox, pero el desarrollo completo de la Oleada 1 no la necesita.
 
 ### 2026-07-04 — H2 Tarea 1: Schema de mensajería (Conversation + Message)
 
