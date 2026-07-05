@@ -69,11 +69,57 @@ la app → Webhooks* según el caso de uso):
 
 ---
 
-## 4. Verificación por curl (sin Meta)
+## 4. Suscripción de la app a la WABA (Graph API)
+
+⚠️ **Paso imprescindible y no obvio** (hallazgo de la verificación en vivo). Hay
+**dos suscripciones distintas** y el panel solo hace la primera:
+
+- **App → campo `messages`** (toggle del panel, §3.4): qué *tipo* de evento
+  quiere recibir la app.
+- **App → tu WABA concreta** (solo vía Graph API): a qué *cuenta de WhatsApp
+  Business* se engancha la app.
+
+Sin la segunda, **el challenge se verifica pero los mensajes NO llegan**: Meta no
+entrega ningún POST al túnel. El toggle del panel no crea esta suscripción.
+
+> **Síntoma de diagnóstico rápido:** "challenge verificado + campo `messages`
+> activado, pero ningún POST llega a ngrok al enviar un WhatsApp" → comprobar
+> `subscribed_apps`.
+
+### 4.1 Comprobar
+
+```bash
+curl -s "https://graph.facebook.com/v25.0/WABA_ID/subscribed_apps" \
+  -H "Authorization: Bearer TOKEN_DE_ACCESO"
+```
+
+Si `data` **no** incluye tu app, falta la suscripción. (Puede aparecer solo la
+app interna de Meta, "WA DevX Webhook Events 1P App" — esa no es la tuya.)
+
+### 4.2 Suscribir
+
+```bash
+curl -s -X POST "https://graph.facebook.com/v25.0/WABA_ID/subscribed_apps" \
+  -H "Authorization: Bearer TOKEN_DE_ACCESO"
+```
+
+Esperado: `{"success":true}`. Re-ejecuta el GET de 4.1: tu app debe aparecer
+ahora en `data`.
+
+### Notas
+
+- **WABA_ID**: el WhatsApp Business Account ID (panel de WhatsApp → *API Setup*).
+- **TOKEN_DE_ACCESO**: el token temporal del panel (Paso 1 → *Identificador de
+  acceso*) o el permanente (System User) cuando exista. **Placeholders en el doc,
+  jamás el valor real.**
+
+---
+
+## 5. Verificación por curl (sin Meta)
 
 Con la API arrancada en `:4000`. Sustituye `APP_SECRET` por el real de tu `.env`.
 
-### 4.1 GET — challenge
+### 5.1 GET — challenge
 
 ```bash
 # Token correcto → devuelve el challenge, 200
@@ -86,7 +132,7 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 # → 403
 ```
 
-### 4.2 POST — mensaje entrante (firma válida)
+### 5.2 POST — mensaje entrante (firma válida)
 
 Guarda un payload de ejemplo (mensaje de texto real de Cloud API). **Ajusta
 `phone_number_id` para que coincida con tu `WHATSAPP_PHONE_NUMBER_ID`.**
@@ -150,12 +196,12 @@ psql "$DATABASE_URL" -c 'select id, "businessId", phone, status, "lastMessageAt"
 psql "$DATABASE_URL" -c 'select id, direction, author, body, "waMessageId" from "Message" order by "createdAt" desc limit 3;'
 ```
 
-### 4.3 POST — dedupe (mismo payload otra vez)
+### 5.3 POST — dedupe (mismo payload otra vez)
 
-Repite el **mismo** curl de 4.2. Respuesta `200`, log `duplicate webhook,
+Repite el **mismo** curl de 5.2. Respuesta `200`, log `duplicate webhook,
 ignored` y **ninguna segunda fila** en `Message`.
 
-### 4.4 POST — firma inválida
+### 5.4 POST — firma inválida
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" -X POST \
@@ -166,14 +212,14 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
 # → 401, nada persistido
 ```
 
-### 4.5 POST — solo statuses / tipo no-texto (firma válida)
+### 5.5 POST — solo statuses / tipo no-texto (firma válida)
 
 Un payload con `value.statuses` (delivered/read) o un `messages[].type` distinto
 de `text`, firmado correctamente → `200`, log de "ignoring", **nada persistido**.
 
 ---
 
-## 5. Verificación en vivo (Meta real)
+## 6. Verificación en vivo (Meta real)
 
 1. API + túnel arrancados; callback URL + verify token + suscripción a `messages`
    configurados en el panel.
