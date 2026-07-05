@@ -9,6 +9,14 @@ const REQUIRED_ENV_VARS = [
   'JWT_SECRET',
   'JWT_ACCESS_TTL',
   'REFRESH_TOKEN_TTL',
+  // WhatsApp Cloud API (H2 — webhook de recepción). Fail-fast: un webhook
+  // medio-configurado que arranca en silencio es peor que un arranque que falla
+  // claro. La resolución de negocio por env (phone_number_id → businessId) es
+  // el mecanismo v1-sandbox, sustituible cuando haya registro de números.
+  'WHATSAPP_WEBHOOK_VERIFY_TOKEN',
+  'WHATSAPP_APP_SECRET',
+  'WHATSAPP_PHONE_NUMBER_ID',
+  'WHATSAPP_BUSINESS_ID',
 ] as const;
 
 export function validateEnv(

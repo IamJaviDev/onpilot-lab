@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { CashModule } from './cash/cash.module';
 import { ClientsModule } from './clients/clients.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { MessagingModule } from './messaging/messaging.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ServicesModule } from './services/services.module';
 import { validateEnv } from './config/env.validation';
@@ -25,6 +26,7 @@ import { PrismaModule } from './prisma/prisma.module';
     PaymentsModule,
     CashModule,
     DashboardModule,
+    MessagingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
