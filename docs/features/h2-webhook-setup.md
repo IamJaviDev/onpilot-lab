@@ -1,7 +1,8 @@
 # H2 — Webhook de WhatsApp: configuración y verificación
 
-Guía operativa para la **Tarea 2/9** (recepción). Cubre el túnel de desarrollo,
-la configuración en el panel de Meta y la receta de pruebas por curl (sin Meta).
+Guía operativa para las **Tareas 2/9 (recepción) y 3/9 (envío + eco)**. Cubre el
+túnel de desarrollo, la configuración en el panel de Meta, el token permanente
+de System User (§7) y las recetas de verificación (curl y en vivo).
 
 > Claude Code **no** instala ni ejecuta el túnel ni levanta servidores: esos
 > pasos los hace Javier. Aquí quedan documentados.
@@ -17,6 +18,8 @@ WHATSAPP_WEBHOOK_VERIFY_TOKEN=<string aleatorio que inventas tú>
 WHATSAPP_APP_SECRET=<App Secret de la app de Meta>
 WHATSAPP_PHONE_NUMBER_ID=<phone_number_id del número de prueba>
 WHATSAPP_BUSINESS_ID=<UUID del Business sandbox en tu BD>
+WHATSAPP_ACCESS_TOKEN=<token permanente de System User — ver §7>
+MESSAGING_ECHO_ENABLED=false   # opcional; solo 'true' exacto activa el eco (§8)
 ```
 
 - **verify token**: lo inventas tú (cualquier string difícil). Se repite tal cual
@@ -26,9 +29,14 @@ WHATSAPP_BUSINESS_ID=<UUID del Business sandbox en tu BD>
 - **phone_number_id**: panel de WhatsApp → *API Setup* (el ID largo, no el número).
 - **WHATSAPP_BUSINESS_ID**: el `id` (UUID) de tu negocio de prueba en la tabla
   `Business`. Sáscalo con: `psql "$DATABASE_URL" -c 'select id, name from "Business";'`
+- **WHATSAPP_ACCESS_TOKEN**: token permanente de System User para enviar
+  mensajes por la Graph API. Cómo generarlo: §7. **Nunca al repo.**
+- **MESSAGING_ECHO_ENABLED**: flag del eco temporal de la Tarea 3. Opcional;
+  solo el string **exacto** `true` lo activa (cualquier otro valor u omisión =
+  apagado). Se retira cuando llegue el BotEngine (Tarea 4).
 
-La API **no arranca** si falta cualquiera de las cuatro (fail-fast en
-`env.validation.ts`).
+La API **no arranca** si falta cualquiera de las cinco primeras (fail-fast en
+`env.validation.ts`); el flag del eco es opcional.
 
 ---
 
@@ -226,3 +234,97 @@ de `text`, firmado correctamente → `200`, log de "ignoring", **nada persistido
 2. Escribe un WhatsApp desde tu móvil al número de prueba.
 3. `psql`: la `Conversation` se creó y el `Message` IN está persistido con su
    `waMessageId`.
+
+---
+
+## 7. Token permanente (System User)
+
+El token del panel (*API Setup → Identificador de acceso*) **caduca cada 24h**:
+inútil para desarrollo continuado. Para enviar mensajes (Tarea 3 en adelante) se
+usa el token de un **System User** del Business Portfolio, que puede no caducar.
+
+> Todo esto es panel de Meta: lo haces tú, no Claude Code.
+
+### 7.1 Crear el System User
+
+1. [business.facebook.com](https://business.facebook.com) → **Configuración del
+   negocio** (elige el portfolio de Onpilot).
+2. Menú **Usuarios → Usuarios del sistema** → **Añadir**.
+3. Nombre (p. ej. `onpilot-backend`) y rol:
+   - **Empleado**: suficiente si luego le asignas la app y la WABA con permisos
+     de gestión (opción recomendada: mínimo privilegio).
+   - **Administrador**: lo pide Meta para ciertas operaciones administrativas;
+     para enviar/gestionar mensajes no hace falta.
+
+### 7.2 Asignar activos
+
+En la ficha del System User → **Asignar activos**:
+
+1. **Apps** → selecciona la app de Onpilot → activa **Administrar app** (o al
+   menos "Desarrollar app").
+2. **Cuentas de WhatsApp** → selecciona la WABA de prueba → activa la gestión
+   de la cuenta (mensajes).
+
+Sin ambos activos el token se genera pero la Graph API devolverá errores de
+permisos al enviar.
+
+### 7.3 Generar el token
+
+En la ficha del System User → **Generar nuevo token**:
+
+1. **App**: la app de Onpilot.
+2. **Caducidad**: dos opciones válidas —
+   - **Nunca** (recomendada en desarrollo: no hay que rotarlo; a cambio, si se
+     filtra hay que revocarlo a mano desde esta misma pantalla).
+   - **60 días** (más conservadora; apunta un recordatorio de rotación).
+3. **Permisos (scopes)**: marca `whatsapp_business_messaging` y
+   `whatsapp_business_management`. Nada más (mínimo privilegio).
+4. Copia el token **una sola vez** (Meta no lo vuelve a mostrar) y pégalo en
+   `apps/api/.env` como `WHATSAPP_ACCESS_TOKEN`.
+
+### 7.4 Higiene del token
+
+- **JAMÁS** en el repo, en el chat de trabajo, en capturas de pantalla ni en
+  logs. Solo en `.env` (ignorado por Git).
+- Si se filtra: ficha del System User → el token → **revocar**, y generar otro.
+- Este token sustituye al temporal del panel en TODO (curls de §4 incluidos).
+
+### 7.5 Comprobación rápida
+
+```bash
+curl -s "https://graph.facebook.com/v25.0/WABA_ID/subscribed_apps" \
+  -H "Authorization: Bearer $WHATSAPP_ACCESS_TOKEN"
+```
+
+Si responde el JSON de suscripciones (y no un error OAuth), el token funciona.
+
+---
+
+## 8. Verificación en vivo del eco (Tarea 3)
+
+Con el token de §7 ya en `.env`:
+
+1. `MESSAGING_ECHO_ENABLED=true` en `apps/api/.env` (exactamente `true`).
+2. Arranca API + túnel; si la URL de ngrok cambió, actualiza la callback URL en
+   el panel (§3).
+3. Escribe un WhatsApp desde tu móvil al número de prueba → debe llegarte **el
+   eco de vuelta al móvil**: `🤖 Eco de prueba de Onpilot: recibido "…"`.
+4. `psql`: el par IN/OUT persistido; el OUT con `direction=OUT`, `author=BOT` y
+   un `waMessageId` real de Meta (distinto del IN):
+
+   ```bash
+   psql "$DATABASE_URL" -c 'select direction, author, body, "waMessageId" from "Message" order by "createdAt" desc limit 4;'
+   ```
+
+5. **Prueba de estados** (el sistema calla fuera de BOT_ACTIVE):
+
+   ```bash
+   # pasar la conversación a control humano
+   psql "$DATABASE_URL" -c 'update "Conversation" set status = '"'"'HUMAN_CONTROL'"'"' where id = '"'"'<CONVERSATION_ID>'"'"';'
+   ```
+
+   Mensaje desde el móvil → **NO** hay eco (el IN sí se persiste). Devuélvela a
+   `BOT_ACTIVE` al terminar.
+
+6. Al acabar la sesión de pruebas, `MESSAGING_ECHO_ENABLED=false` (o quitar la
+   línea): el default es apagado.

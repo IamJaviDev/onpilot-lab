@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ConversationStatus } from '../generated/prisma/client';
 import { ConversationService } from './conversation.service';
 import { normalizePhone } from './phone.util';
 import { isValidSignature } from './signature.util';
+import { WhatsAppAdapter } from './whatsapp.adapter';
 import type {
   WhatsAppChangeValue,
   WhatsAppWebhookPayload,
@@ -15,6 +17,7 @@ export class WebhookService {
   constructor(
     private readonly config: ConfigService,
     private readonly conversations: ConversationService,
+    private readonly whatsapp: WhatsAppAdapter,
   ) {}
 
   /** Token que Meta debe repetir en el GET de verificación (hub challenge). */
@@ -86,14 +89,61 @@ export class WebhookService {
           continue;
         }
 
-        await this.conversations.persistIncoming({
+        const result = await this.conversations.persistIncoming({
           businessId,
           phone: normalizePhone(message.from),
           body,
           waMessageId: message.id,
           timestamp: parseWhatsAppTimestamp(message.timestamp),
         });
+
+        // ECO TEMPORAL (Tarea 3) — sustituir por BotEngine en Tarea 4.
+        // Activación solo con el string EXACTO 'true' (cualquier otro valor u
+        // omisión = apagado, default silencioso a prueba de typos). No se ecoa
+        // en duplicados (dedupe) ni fuera de BOT_ACTIVE: en HUMAN_CONTROL /
+        // PENDING_REVIEW el sistema no responde (patrón de la Tarea 6).
+        if (
+          this.config.get<string>('MESSAGING_ECHO_ENABLED') === 'true' &&
+          result.persisted &&
+          result.conversationStatus === ConversationStatus.BOT_ACTIVE
+        ) {
+          await this.sendEcho(
+            businessId,
+            result.conversationId,
+            message.from,
+            body,
+          );
+        }
       }
+    }
+  }
+
+  /**
+   * ECO TEMPORAL (Tarea 3) — sustituir por BotEngine en Tarea 4.
+   * Envía un texto fijo de vuelta y persiste el OUT. Nunca rompe la recepción:
+   * si el envío o la persistencia del OUT fallan (token, ventana 24h, red…),
+   * se loguea y ya está — el IN quedó persistido y el 200 a Meta ya salió.
+   */
+  private async sendEcho(
+    businessId: string,
+    conversationId: string,
+    to: string,
+    receivedBody: string,
+  ): Promise<void> {
+    try {
+      const echoBody = `🤖 Eco de prueba de Onpilot: recibido "${receivedBody}". (El asistente llegará pronto.)`;
+      const { waMessageId } = await this.whatsapp.sendText(to, echoBody);
+      await this.conversations.persistOutgoing({
+        businessId,
+        conversationId,
+        body: echoBody,
+        waMessageId,
+      });
+    } catch (error) {
+      this.logger.error(
+        'Echo send failed (incoming message is already persisted)',
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 }

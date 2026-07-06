@@ -16,6 +16,27 @@ export interface IncomingTextMessage {
   timestamp: Date;
 }
 
+/**
+ * Resultado de persistir un entrante. El caso `persisted: true` expone la
+ * conversación (id + status) para que el llamante pueda decidir la respuesta
+ * automática sin una query extra fuera de la transacción.
+ */
+export type PersistIncomingResult =
+  | {
+      persisted: true;
+      conversationId: string;
+      conversationStatus: ConversationStatus;
+    }
+  | { persisted: false };
+
+export interface OutgoingBotMessage {
+  businessId: string;
+  conversationId: string;
+  body: string;
+  // wamid devuelto por Meta al enviar.
+  waMessageId: string;
+}
+
 @Injectable()
 export class ConversationService {
   private readonly logger = new Logger(ConversationService.name);
@@ -31,11 +52,14 @@ export class ConversationService {
    * duplicado esperado (no error) → la transacción revierte por completo, sin
    * dejar conversación ni mensaje fantasma.
    *
-   * @returns true si persistió, false si era un duplicado ya visto.
+   * @returns la conversación afectada si persistió; `persisted: false` si era
+   *   un duplicado ya visto.
    */
-  async persistIncoming(msg: IncomingTextMessage): Promise<boolean> {
+  async persistIncoming(
+    msg: IncomingTextMessage,
+  ): Promise<PersistIncomingResult> {
     try {
-      await this.prisma.$transaction(async (tx) => {
+      return await this.prisma.$transaction(async (tx) => {
         // Vinculación best-effort con un Client existente por teléfono.
         // Si el formato no casa (H1 local vs E.164), clientId queda null.
         const client = await tx.client.findFirst({
@@ -54,7 +78,7 @@ export class ConversationService {
             status: { not: ConversationStatus.CLOSED },
             deletedAt: null,
           },
-          select: { id: true },
+          select: { id: true, status: true },
         });
 
         const conversation =
@@ -66,7 +90,7 @@ export class ConversationService {
               phone: msg.phone,
               status: ConversationStatus.BOT_ACTIVE,
             },
-            select: { id: true },
+            select: { id: true, status: true },
           }));
 
         await tx.message.create({
@@ -84,8 +108,13 @@ export class ConversationService {
           where: { id: conversation.id },
           data: { lastMessageAt: msg.timestamp },
         });
+
+        return {
+          persisted: true as const,
+          conversationId: conversation.id,
+          conversationStatus: conversation.status,
+        };
       });
-      return true;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -94,9 +123,37 @@ export class ConversationService {
         this.logger.log(
           `duplicate webhook, ignored (waMessageId=${msg.waMessageId})`,
         );
-        return false;
+        return { persisted: false };
       }
       throw error;
     }
+  }
+
+  /**
+   * Persiste un mensaje saliente ya enviado por el bot: Message OUT/BOT con el
+   * wamid que devolvió Meta, y actualización de lastMessageAt. El CHECK de
+   * coherencia dirección/autor de la Tarea 1 lo protege además en BD.
+   *
+   * `author: BOT` fijo a propósito: las respuestas de humanos (HUMAN) llegan
+   * con la bandeja de la Tarea 6.
+   */
+  async persistOutgoing(msg: OutgoingBotMessage): Promise<void> {
+    await this.prisma.$transaction([
+      this.prisma.message.create({
+        data: {
+          businessId: msg.businessId,
+          conversationId: msg.conversationId,
+          direction: MessageDirection.OUT,
+          author: MessageAuthor.BOT,
+          body: msg.body,
+          waMessageId: msg.waMessageId,
+        },
+      }),
+      // updateMany con id + businessId: regla multi-tenant del proyecto.
+      this.prisma.conversation.updateMany({
+        where: { id: msg.conversationId, businessId: msg.businessId },
+        data: { lastMessageAt: new Date() },
+      }),
+    ]);
   }
 }

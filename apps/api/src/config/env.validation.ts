@@ -17,6 +17,9 @@ const REQUIRED_ENV_VARS = [
   'WHATSAPP_APP_SECRET',
   'WHATSAPP_PHONE_NUMBER_ID',
   'WHATSAPP_BUSINESS_ID',
+  // Token permanente (System User) para el envío por Graph API (Tarea 3).
+  // MESSAGING_ECHO_ENABLED NO va aquí: es opcional y su ausencia significa off.
+  'WHATSAPP_ACCESS_TOKEN',
 ] as const;
 
 export function validateEnv(
