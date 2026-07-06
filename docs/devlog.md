@@ -94,6 +94,27 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-06 — H2 Tarea 3: WhatsAppAdapter de envío + eco de prueba (Onpilot responde por primera vez)
+
+**Qué se hizo.** La mitad saliente de la tubería: `WhatsAppAdapter` (única pieza que habla con la Graph API para enviar; interfaz `sendText(to, body) → {waMessageId}`, intercambiable por diseño multicanal), `persistOutgoing` en ConversationService (Message OUT/BOT + lastMessageAt), y eco temporal activable por flag que responde un texto fijo a cada IN. Sin bot: el eco es fontanería, marcado `// ECO TEMPORAL (Tarea 3)` para sustitución directa por el BotEngine en T4.
+
+**Decisiones clave.**
+- fetch nativo de Node 24 (sin dependencia HTTP nueva) + `AbortSignal.timeout(10s)`. Errores de Meta mapeados a `WhatsAppSendError` (code/subcode); caso 131047 (ventana 24h cerrada) con log específico — manejo con plantillas diferido.
+- El adapter no conoce Prisma/negocio; la orquestación vive en webhook/conversation service. `author: BOT` hardcodeado en persistOutgoing (generalización a HUMAN en T6).
+- Retorno de `persistIncoming` ampliado a `{persisted, conversationId, conversationStatus}` (desviación aprobada: el eco necesita el estado sin query extra fuera de transacción).
+- Eco solo si `MESSAGING_ECHO_ENABLED === 'true'` estricto (it.each: 'TRUE', '1', 'false', 'true ', ausente → NO eco) Y conversación en `BOT_ACTIVE` — el patrón "el sistema calla fuera de BOT_ACTIVE" establecido desde el primer envío. Fallo de envío no rompe la recepción (try/catch propio; el IN persiste igual).
+- Al responder se usa el `from` crudo de Meta (formato que Meta espera); el E.164 normalizado es solo para BD.
+- Token permanente vía System User (Onpilot-backend, acceso Employee, activos: app + WABA, scopes messaging+management, sin caducidad) — documentado en §7 del setup; sustituye a los temporales de 24h.
+- Desviación menor aprobada: moduleNameMapper en config de jest (imports ESM .js del cliente Prisma; primera suite que lo carga). Solo tests.
+
+**Verificación.** lint/typecheck/build + 24/24 tests (4 suites). En vivo: eco recibido en el móvil (par IN/OUT en BD, el OUT con author=BOT y wamid real de Meta). Prueba de estados: conversación a HUMAN_CONTROL por psql → mensaje → silencio (el IN sí persiste) → BOT_ACTIVE → el eco vuelve. Tropiezo instructivo: el primer intento de la prueba actualizó la conversación fantasma de los curls de T2 (+34600000000) en vez de la real — el UPDATE de la prueba de estados debe apuntar por id explícito, no por status.
+
+**Commit.** `feat(api): WhatsAppAdapter de envío + eco de prueba tras recepción`
+
+**Higiene de secretos (sesión).** App Secret restablecido (el anterior salió en captura). Pendiente inmediato: rotar verify token y regenerar el token temporal del panel de ayer. Regla reforzada: cerrar la pestaña del .env antes de capturar pantalla.
+
+**Deuda nueva (menor).** Doc §8: añadir "listar conversaciones y apuntar el UPDATE por id" (evitar el tropiezo de la conversación fantasma). Conversación de prueba +34600000000 en BD — cerrarla (CLOSED) o dejarla como historial de test.
+
 ### 2026-07-05 — H2 Tarea 2: Webhook de recepción de WhatsApp (verificado con mensaje real)
 
 **Qué se hizo.** Módulo `messaging` en apps/api: recepción completa Meta→BD. `WebhookController` (GET challenge + POST con firma sobre rawBody, 200 rápido, sin JwtAuthGuard — protegido por HMAC), `WebhookService` (verificación de firma delegada en util pura, parseo Cloud API, resolución de negocio por env), `ConversationService` (persistencia en $transaction: find-or-create de conversación abierta + Message IN + lastMessageAt + dedupe P2002). Sin bot, sin envío — solo recepción. Doc de setup: `docs/features/h2-webhook-setup.md`.
