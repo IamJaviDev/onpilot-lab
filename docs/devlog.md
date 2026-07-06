@@ -30,6 +30,13 @@ lo cerró.
   exista gestión de staff; hoy solo hay owners. _(Generado en Clients.)_
 - [ ] **Consulta/lectura de AuditLog.** Endpoint GET + pantalla para ver el historial de
   auditoría. Diferida, acoplada al futuro RolesGuard (quién puede verla). _(Generado en AuditLog, 01/07/26.)_
+  - [ ] **Higiene de secretos pendiente.** Rotar verify token del webhook y regenerar el token
+  temporal del panel (ambos expuestos en chat de trabajo). App Secret ya restablecido.
+  _(Generado en H2 T2-T3, 06/07/26.)_
+  - [ ] **RGPD antes de clientes reales (DESTACADA).** Contrato de encargado del tratamiento con
+  cada negocio + cifrado de datos en reposo. Requiere entidad legal. Bloquea lanzamiento, no
+  desarrollo. _(Generado en doc de feature H2, 04/07/26.)_
+
 
 ### Backend / datos
 - [ ] **Índice redundante de teléfono.** `Client_businessId_phone_idx` (no único,
@@ -46,6 +53,11 @@ lo cerró.
 - [ ] **Cita activa vencida sin cerrar.** Una cita SCHEDULED/CONFIRMED con `startsAt` ya
   pasado no aparece ni en próximas ni en historial de la ficha. Aceptable MVP.
   _(Generado en Ficha enriquecida, 01/07/26.)_
+   [ ] **Normalización de teléfonos H1↔E.164.** H1 puede guardar teléfono local ("600…") y Meta
+  manda internacional ("34600…"); si no casan, la vinculación Conversation→Client queda en
+  clientId null (seguro pero pierde el enlace). Unificar formato. _(Generado en H2 T2, 05/07/26.)_
+- [ ] **Conversación fantasma de test (+34600000000) en BD.** Cerrarla (CLOSED) o asumirla como
+  historial de test. _(Generado en H2 T3, 06/07/26.)_
 
 ### Frontend / UX
 - [ ] **Ficha enriquecida sin tags por actividad.** `computeTags` solo da VIP/NEW. Los tags
@@ -67,6 +79,13 @@ lo cerró.
 - [ ] **CSRF token en Auth.** El refresh va en cookie httpOnly con `sameSite:'strict'`
   (mitigación suficiente para MVP). Si se relaja a `lax`/`none`, añadir CSRF explícito.
   _(Generado en frontend-auth.)_
+  - [ ] **Date-picker de salto rápido en Agenda.** Eliminado con la vista semanal; reintroducir
+  (llevando a semana+día) si se echa en falta. _(Generado en Vista semanal, 04/07/26.)_
+- [ ] **Flecos de design tokens.** Nav de agenda a 8px vs tarjetas 18px; `bg-white` sobre fondo
+  cálido; ficha de cliente sin tipografía KPI 800; botones secundarios sin restylear. Todos
+  menores, reevaluar si cantan. _(Generado en Design tokens T2-T3, 04/07/26.)_
+   - [x] **Refinamiento de design tokens del frontend.** _(→ Design tokens 1-3, 04/07/26.)_
+
 
 ## Deuda cerrada
 
@@ -90,6 +109,14 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 - **Convención monetaria (regla de oro).** El dinero se calcula SIEMPRE en backend con
   Decimal; el `number` de las respuestas de la API es solo para display, jamás para
   recalcular. _(Services.)_
+
+  ### Docs
+- [ ] **05-database-model.md desfasado.** Describe un diseño PREVIO de mensajería distinto al
+  construido (externalPhone/senderType/channel). Alinear en microtarea; decidir si `channel`
+  vuelve en v2 multicanal o queda como concepto del adapter. _(Generado en H2 T1, 04/07/26.)_
+- [ ] **h2-webhook-setup.md §8: UPDATE por id explícito.** Añadir "listar conversaciones y apuntar
+  el id" a la prueba de estados (evita el tropiezo de la conversación fantasma). _(Generado en H2 T3, 06/07/26.)_
+
 
 
 ## Asientos
@@ -145,7 +172,8 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 **Notas operativas.** El token del panel es temporal (24h) — en la Tarea 2/3 se generará uno permanente (System User); JAMÁS commitear tokens. "Hazte proveedor de tecnología" y "Publicar app" NO tocados: innecesarios para el MVP (modo desarrollo + sandbox basta). Paso 2 (número de producción + método de pago) diferido.
 
-**Pendiente (esta semana).** Iniciar la verificación de la empresa (Paso 3 / Security Centre) con la documentación del negocio — es el trámite de semanas que corre en paralelo; sin ella no se sale del sandbox, pero el desarrollo completo de la Oleada 1 no la necesita.
+**Pendiente (ligado a lanzamiento, no al desarrollo).** La verificación de empresa (Paso 3) requiere entidad legal (autónomo/sociedad), que aún no existe. Sin ella no se sale del sandbox, pero el sandbox cubre TODA la Oleada 1 (5 destinatarios de prueba bastan para desarrollo y demos). Decisión de negocio: darse de alta (autónomo como opción ligera) antes de captar clientes reales — misma condición que ya impone la deuda RGPD (el contrato de encargado del tratamiento necesita entidad que firme). Añadido al criterio de lanzable de H2.
+
 
 ### 2026-07-04 — H2 Tarea 1: Schema de mensajería (Conversation + Message)
 
@@ -227,7 +255,14 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 **Commit.** `feat(api): rate limiting en Auth con @nestjs/throttler (login 5/min, register 3/min, refresh 10/min)`
 
 **Deuda cerrada.** ✅ Rate limiting en Auth.
-**Deuda nueva (DESTACADA).** trust proxy NO configurado: sin él, el rate limiting por IP no protege bien en producción tras el proxy (Railway) ni desde el navegador vía rewrites de Next — todas las peticiones aparentan venir de la IP del proxy (un cubo compartido). Configurar trust proxy correctamente antes de producción (hacerlo mal permite spoofing de X-Forwarded-For). No es nota menor. Además: storage del throttler en memoria (mono-instancia) → migrar a Redis si se escala a multi-instancia.
+- [ ] **trust proxy NO configurado (DESTACADA).** Sin él, el rate limiting por IP no protege
+  bien en producción tras el proxy (Railway) ni desde el navegador vía rewrites de Next —
+  todas las peticiones aparentan venir de la IP del proxy. Configurarlo correctamente antes
+  de producción (hacerlo mal permite spoofing de X-Forwarded-For). Además: storage del
+  throttler en memoria → Redis si multi-instancia. _(Generado en Rate limiting, 04/07/26.)_
+  Nota (06/07/26): con el webhook de H2 detrás de ngrok en desarrollo, el efecto ya es
+  visible — todas las peticiones aparentan venir del túnel. Al configurarlo en producción,
+  contemplar también las rutas de messaging, no solo Auth.
 
 ### 2026-07-04 — AuditLog transversal (solo escritura)
 
