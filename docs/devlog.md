@@ -60,18 +60,29 @@ lo cerró.
   historial de test. _(Generado en H2 T3, 06/07/26.)_
 
 ### IA / Bot (H2)
-- [ ] **Fallo TOTAL de Claude = silencio.** El SDK (adoptado en T5) ya reintenta 429/5xx/red
-  automáticamente; si aun así falla, el cliente no recibe nada (solo log). Mensaje de cortesía
-  pendiente. _(Generado en H2 T4, 07/07/26; retries resueltos en T5, 07/07/26.)_
+- [ ] **Fallo TOTAL de Claude = silencio (solo sin efecto).** Mitigada en T6: tras una tool CON
+  EFECTO ok (crear/cancelar/escalar), el silencio (vacío/refusal/fallo SDK) produce texto fijo
+  desde los tool_results. Queda el caso sin efecto (fallo antes de actuar): el cliente no
+  recibe nada (solo log); mensaje de cortesía pendiente. _(Generado en H2 T4, 07/07/26;
+  retries resueltos en T5; silencio post-efecto resuelto en T6, 08/07/26.)_
+- [ ] **Devolución PENDING_REVIEW → BOT_ACTIVE solo por psql.** El bot nunca se auto-reactiva
+  (por diseño); la devolución manual es psql hasta el panel de conversaciones (Oleada 2).
+  _(Generado en H2 T6, 08/07/26.)_
 - [ ] **Reservas para terceros (producto).** Hoy: 1 Client por teléfono; el nombre del tercero
   se conserva como nota en la cita ("Reserva a nombre de: X (vía WhatsApp)") — paliativo.
   Soporte real de múltiples personas por teléfono: decisión de producto futura.
   _(Generado en H2 T5, 07/07/26.)_
 - [ ] **Horario semanal solo por psql.** `Business.weeklySchedule` no tiene UI de configuración
   (llegará con H5); seed/cambios a mano según §9 del doc de setup. _(Generado en H2 T5, 07/07/26.)_
-- [ ] **Heurística anti-fantasma: evolución a marcador estructural.** Si la detección por texto
-  (participios) resulta ruidosa en producción, evaluar código de reserva en el tool_result que
-  el texto legítimo deba citar. Medible vía `metadata.phantomGuard`. _(Generado en H2 T5, 07/07/26.)_
+- [ ] **Heurística anti-fantasma: evolución a marcador estructural.** Desde T6 cubre 3
+  pretensiones (reserva/cancelación/escalado). Si resulta ruidosa en producción (p. ej. un
+  "el equipo te atenderá" cortés degradando a escalado real), evaluar código de operación en el
+  tool_result que el texto legítimo deba citar. Medible vía `metadata.phantomGuard`.
+  _(Generado en H2 T5, 07/07/26; extendida en T6, 08/07/26.)_
+- [ ] **Referencia corta de cita si el ordinal reincide.** El modelo tendió a usar el número de
+  orden del listado como appointmentId; mitigado en T6 (prompt + aviso en tool_result +
+  validación de shape). Si reincide, evaluar referencia corta re-mapeada (exige estado por
+  conversación). Medible por errores "appointmentId inválido" en logs. _(Generado en H2 T6, 08/07/26.)_
 - [ ] **contextSummary sin implementar.** Ventana fija de 10 mensajes; en conversaciones largas
   el bot pierde el contexto anterior. El campo ya existe en Conversation. _(Generado en H2 T4, 07/07/26.)_
 - [ ] **Prompt caching diferido.** El system prompt se reconstruye (y se factura entero) en cada
@@ -138,6 +149,25 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 
 ## Asientos
+
+### 2026-07-08 — H2 Tarea 6: Escalado real + cancelar/reprogramar
+
+**Qué se hizo.** El ciclo conversacional completo: (a) el escalado dejó de ser verbal — `escalar_a_humano` (enum de 5 motivos del 09, auditado en metadata) ejecuta la transición real a PENDING_REVIEW, la única escritura de status desde el bot; el guard de T3 hace el resto (el bot calla de verdad). (b) `listar_mis_citas` + `cancelar_cita` con **identidad por teléfono innegociable** (solo citas de los Clients del phone de la conversación; error único byte-a-byte para ajena/pasada/inactiva/otro-negocio — ni el texto filtra). (c) Reprogramar como flujo compuesto en prompt (crear-antes-de-cancelar: si algo falla, el cliente queda CON cita). Reutilización directa de cancel() de H1 (auditoría: ya invocable, soft, sin refactor). Guardia anti-fantasma generalizada a 3 pretensiones (reserva/cancelación/escalado) con filtro de interrogativas. **Opción A**: los fallbacks que prometen equipo escalan de verdad — el fallback disparándose ES el momento de atención humana.
+
+**Los 4 fixes de la verificación en vivo** (141→152 tests):
+1. **Escalado silencioso** — tool ok + Claude devolvió texto vacío → el "empty→silencio" de T4 se tragó la despedida: cliente escalado sin saberlo (intermitente). Fix: `replyForSilence()` — tras tool CON EFECTO ok, texto fijo compuesto de los tool_results reales; generalizado a las 3 rutas de silencio (vacío/refusal/fallo de SDK a mitad de bucle). Acción con efecto JAMÁS acaba en silencio.
+2. **El ordinal como id** — el modelo envió `appointmentId: "4"` (el número del listado, no el UUID). Fix: instrucción en prompt + aviso EN el tool_result de listar (el punto de uso). Referencia corta re-mapeada: rechazada con justificación (exigiría estado por conversación en un engine stateless — complejidad sin necesidad probada; deuda si reincide).
+3. **Input malformado → stack de Prisma** — el "4" llegó a findFirst (P2023) → error opaco → escalado evitable. Fix: validación de shape pre-query en TODOS los inputs de tools (audit completo) → errores de negocio legibles con autocorrección guiada ("vuelve a llamar a listar_mis_citas"). Ningún input del modelo puede producir un stack.
+4. **Fallo parcial deshonesto** — crear ok + cancelar fallido dejó DOS citas y el bot despidió con el genérico, sin avisar del duplicado. Fix determinista: esa combinación de toolCalls produce el texto honesto fijo ("he creado la nueva pero no pude anular la anterior — te han quedado las dos; aviso al equipo").
+
+**Verificación final (los 4 escenarios).** Escalado → PENDING_REVIEW en BD + silencio total posterior (INs persistidos) ✅. Listar → las 5 citas exactas con "a nombre de Lucía" ✅. Cancelar → UUID correcto en el log, CANCELLED en BD ✅. Reprogramar → nueva CONFIRMED + vieja CANCELLED, sin duplicados pese a un doble-"sí" del cliente (la protección de solape absorbió el riesgo) ✅.
+
+**Commit.** `feat(api): escalado real + cancelar/reprogramar por el bot`
+
+**Refinamiento acumulado para BotConfig/v2 (no bugs).** Aritmética de calendario del modelo floja en el razonamiento PRE-consulta ("el martes ya pasó" → ofrece "martes 15"; el diaSemana de la tool corrige al consultar, pero la resolución de fechas relativas es previa) — candidata: mini-calendario de 7 días en el prompt, no solo el "hoy". Doble petición de confirmación en cancelaciones dentro de reprogramación. La despedida del escalado a veces del modelo, a veces fija — homogeneizar tono cuando haya BotConfig.
+
+**Moraleja (refuerzo de T5).** 152 tests y los 4 hallazgos solo en vivo — y tres de los cuatro de la misma familia: *el modelo hace lo natural, no lo instruido* (usa el número visible, calla al terminar, no redacta el aviso incómodo). La respuesta es siempre la misma: determinismo en el backend para todo lo que importa.
+
 
 ### 2026-07-07 — H2 Tarea 5: Acciones de agenda del bot (disponibilidad real + creación con confirmación)
 
