@@ -130,6 +130,27 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-07 — H2 Tarea 4: BotEngine v0 con Claude Haiku (el bot conversa)
+
+**Qué se hizo.** Sustituido el eco de T3 por el primer bot real: Claude Haiku respondiendo con datos reales del negocio. `bot-prompt.builder.ts` (función pura: identidad + servicios reales con precio/duración + timezone + reglas del 09) y `bot-engine.service.ts` (lee Business/Services/historial de BD — todo filtrado por businessId —, llama a /v1/messages con fetch nativo, devuelve texto + metadata de tokens o null ante fallo). El eco y su flag, extinguidos del código (grep = 0; el asiento histórico de T3 en devlog se conserva como memoria).
+
+**Decisiones clave.**
+- Alcance v0 (opción A, sin BotConfig): prompt construido solo con lo existente (Business + Services). La configurabilidad llega cuando el uso real diga qué merece configurarse. Solo conversación informativa: el bot habla, no actúa (acciones de agenda = T5; transiciones de estado = T6; en v0 el escalado es verbal — dice "aviso al equipo" pero el estado no cambia).
+- Cumplimiento de serie: identificación proactiva como IA en el primer mensaje de cada conversación (Art. 50, deadline 2026-08-02) — detectada por ausencia de OUT previo del BOT; uso auxiliar Meta implementado como regla de redirección en el prompt.
+- Regla dura de no-citas en v0: ante petición de cita, toma nota + "el equipo confirma", sin inventar disponibilidad. Verificado en vivo: la cumplió e incluso pidió el nombre para la reserva.
+- fetch nativo (sin SDK: una llamada, coherencia con el adapter, sin retries por diseño — fallo → log + silencio, mejor que error raro al cliente). claude-haiku-4-5, max_tokens 500, temperature 0.3, timeout 30s.
+- Historial: últimos 10 mensajes como turnos user/assistant; el IN actual va como último turno, excluido del historial (evita duplicado). Services vacíos → el prompt lo declara y prohíbe inventar.
+- `BOT_ENGINE_ENABLED === 'true'` estricto (mismo patrón que el eco); `ANTHROPIC_API_KEY` obligatoria fail-fast.
+- Metadata de coste en cada OUT: `{model, inputTokens, outputTokens}` — medición desde el mensaje uno.
+
+**Verificación en vivo (guion de 5 pruebas + estados).** Identificación IA en el saludo ✅. Servicios: SOLO los de BD (Consulta 20€/30min), cero inventos ✅. Fuera de scope (fútbol) → redirección a temas del negocio ✅. Cita → toma nota sin inventar huecos ✅. Lo que no sabe (parking) → "aviso al equipo" ✅. Estados: HUMAN_CONTROL → silencio / BOT_ACTIVE → responde ✅. Metadata en todos los OUT. Coste de la primera conversación completa (4 respuestas): ~3.740 in + ~218 out ≈ menos de medio céntimo — a este coste, ~20 conversaciones/día ≈ 2-3€/mes por negocio.
+Bonus no buscado: por un despiste (la conversación de T3 no llegó a cerrarse), el bot conversó con ecos en el historial sin imitarlos ni confundirse — robustez verificada de rebote. La recomendación de empezar limpio sigue en el doc.
+
+**Commit.** `feat(api): BotEngine v0 con Claude Haiku (conversación informativa)`
+
+**Deuda nueva (menor, para BotConfig/refinamiento futuro).** El bot repite la coletilla "el equipo te confirmará en breve" en mensajes consecutivos — pulir con instrucción anti-repetición cuando haya BotConfig. Env de Anthropic: puesto límite de gasto en consola como salvaguarda.
+
+
 ### 2026-07-07 — H2 Tarea 4: BotEngine v0 con Claude Haiku (el bot habla, no actúa)
 
 **Qué se hizo.** El primer bot de verdad sustituye al eco de T3: `BotEngineService` genera la
