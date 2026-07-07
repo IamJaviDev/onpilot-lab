@@ -59,6 +59,15 @@ lo cerró.
 - [ ] **Conversación fantasma de test (+34600000000) en BD.** Cerrarla (CLOSED) o asumirla como
   historial de test. _(Generado en H2 T3, 06/07/26.)_
 
+### IA / Bot (H2)
+- [ ] **Fallo de Claude = silencio total.** Sin reintentos (por diseño en v0) ni mensaje de
+  cortesía al cliente; solo log. Reevaluar SDK oficial (retries automáticos, errores tipados)
+  cuando llegue tool use en T5. _(Generado en H2 T4, 07/07/26.)_
+- [ ] **contextSummary sin implementar.** Ventana fija de 10 mensajes; en conversaciones largas
+  el bot pierde el contexto anterior. El campo ya existe en Conversation. _(Generado en H2 T4, 07/07/26.)_
+- [ ] **Prompt caching diferido.** El system prompt se reconstruye (y se factura entero) en cada
+  request; cachear cuando el volumen lo justifique (fase 4 del doc técnico). _(Generado en H2 T4, 07/07/26.)_
+
 ### Frontend / UX
 - [ ] **Ficha enriquecida sin tags por actividad.** `computeTags` solo da VIP/NEW. Los tags
   derivados de comportamiento (REACTIVATE/REGULAR) quedaron fuera. _(Generado en Ficha enriquecida, 01/07/26.)_
@@ -120,6 +129,50 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 
 ## Asientos
+
+### 2026-07-07 — H2 Tarea 4: BotEngine v0 con Claude Haiku (el bot habla, no actúa)
+
+**Qué se hizo.** El primer bot de verdad sustituye al eco de T3: `BotEngineService` genera la
+respuesta con `claude-haiku-4-5` a partir de datos reales de BD (Business + Services activos +
+últimos 10 mensajes), y `buildBotSystemPrompt` (builder puro, testeable sin Nest/Prisma) monta el
+system prompt dinámico: identidad + nunca-decir-que-es-humano, servicios con precio/duración,
+timezone, regla dura de no-citas ("tomo nota, el equipo confirma" — cero acciones de agenda, cero
+transiciones de estado), redirección de temas ajenos (política Meta), sin datos clínicos, e
+identificación proactiva como IA (Art. 50) solo en la primera respuesta de cada conversación.
+Cada OUT del bot persiste metadata `{inputTokens, outputTokens, model}` (Json) — coste medido
+desde el día 1. Eco y `MESSAGING_ECHO_ENABLED` eliminados por completo (queda solo la mención
+histórica en el asiento de T3 de este devlog).
+
+**Decisiones clave.**
+- fetch nativo contra `/v1/messages` (coherencia con el adapter; sin retries POR DISEÑO en v0;
+  el SDK oficial se reevalúa en T5 cuando llegue tool use). Timeout 30s con AbortSignal,
+  max_tokens 500, temperature 0.3, HISTORY_LIMIT 10 — constantes en el service.
+- El BotEngine solo LEE de BD y genera texto; la orquestación (generar → enviar → persistir) vive
+  en webhook.service (patrón de separación de T3). Cualquier fallo de Claude (red, 429, 5xx,
+  respuesta vacía, refusal) → log claro + `null` → silencio; mejor silencio que error raro, y la
+  recepción jamás se rompe.
+- Multi-tenancy: las 4 queries del engine (business, services, OUT previo, historial) filtradas
+  por businessId, con test dedicado que inspecciona los `where` reales; el builder es puro y solo
+  recibe el negocio ya resuelto — el prompt no puede contener datos de otro negocio.
+- Identificación IA: `findFirst` de OUT/BOT aparte del historial (un OUT previo puede quedar
+  fuera de la ventana de 10). Historial mapeado IN→user / OUT→assistant, descartando turnos
+  assistant iniciales (la API exige empezar por user).
+- Services vacíos: el prompt lo declara explícitamente y prohíbe inventar (el bot sigue útil
+  para tomar nota) — decisión aprobada en el plan.
+- Ecos de T3 en el historial: NO se filtran por contenido (frágil); en pruebas se cierra la
+  conversación vieja (CLOSED) y se empieza limpia — documentado en §8 del doc de setup.
+- Flag `BOT_ENGINE_ENABLED === 'true'` estricto (mismo patrón e it.each que el eco);
+  `ANTHROPIC_API_KEY` obligatoria fail-fast, mismas reglas de secreto que el access token.
+
+**Verificación.** lint/typecheck/build + 45/45 tests (6 suites): builder (services reales,
+vacíos, identificación condicional, no-citas), engine con fetch/Prisma mockeados y orquestación
+del webhook (estados, dedupe, fallos no propagados). Verificación en vivo (Javier) según el §8
+reescrito del doc de setup, previa a pedir el commit.
+
+**Commit.** `feat(api): BotEngine v0 con Claude Haiku (conversación informativa)`
+
+**Deuda nueva.** Fallo de Claude = silencio (sin retries ni cortesía); contextSummary sin
+implementar (ventana fija de 10); prompt caching diferido. Ver sección IA / Bot (H2).
 
 ### 2026-07-06 — H2 Tarea 3: WhatsAppAdapter de envío + eco de prueba (Onpilot responde por primera vez)
 
