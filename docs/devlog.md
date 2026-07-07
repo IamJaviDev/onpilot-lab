@@ -60,9 +60,18 @@ lo cerró.
   historial de test. _(Generado en H2 T3, 06/07/26.)_
 
 ### IA / Bot (H2)
-- [ ] **Fallo de Claude = silencio total.** Sin reintentos (por diseño en v0) ni mensaje de
-  cortesía al cliente; solo log. Reevaluar SDK oficial (retries automáticos, errores tipados)
-  cuando llegue tool use en T5. _(Generado en H2 T4, 07/07/26.)_
+- [ ] **Fallo TOTAL de Claude = silencio.** El SDK (adoptado en T5) ya reintenta 429/5xx/red
+  automáticamente; si aun así falla, el cliente no recibe nada (solo log). Mensaje de cortesía
+  pendiente. _(Generado en H2 T4, 07/07/26; retries resueltos en T5, 07/07/26.)_
+- [ ] **Reservas para terceros (producto).** Hoy: 1 Client por teléfono; el nombre del tercero
+  se conserva como nota en la cita ("Reserva a nombre de: X (vía WhatsApp)") — paliativo.
+  Soporte real de múltiples personas por teléfono: decisión de producto futura.
+  _(Generado en H2 T5, 07/07/26.)_
+- [ ] **Horario semanal solo por psql.** `Business.weeklySchedule` no tiene UI de configuración
+  (llegará con H5); seed/cambios a mano según §9 del doc de setup. _(Generado en H2 T5, 07/07/26.)_
+- [ ] **Heurística anti-fantasma: evolución a marcador estructural.** Si la detección por texto
+  (participios) resulta ruidosa en producción, evaluar código de reserva en el tool_result que
+  el texto legítimo deba citar. Medible vía `metadata.phantomGuard`. _(Generado en H2 T5, 07/07/26.)_
 - [ ] **contextSummary sin implementar.** Ventana fija de 10 mensajes; en conversaciones largas
   el bot pierde el contexto anterior. El campo ya existe en Conversation. _(Generado en H2 T4, 07/07/26.)_
 - [ ] **Prompt caching diferido.** El system prompt se reconstruye (y se factura entero) en cada
@@ -129,6 +138,57 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 
 ## Asientos
+
+### 2026-07-07 — H2 Tarea 5: acciones de agenda del bot (el círculo completo del producto)
+
+**Qué se hizo.** El bot pasa de hablar a actuar: `consultar_disponibilidad` (horario semanal −
+citas activas → slots de 30 min en timezone del negocio, máx. 8 al modelo) y `crear_cita`
+(solo tras confirmación explícita; resuelve cliente vinculado → por teléfono → creación mínima,
+y reutiliza `AppointmentsService.create` de H1). Tool use nativo de Anthropic con bucle manual
+(tope 5 → fallback) sobre el SDK oficial. Verificado en vivo: reserva completa por WhatsApp
+visible en la Agenda web.
+
+**Auditoría previa (resultados).** Horario: NO existía → `weeklySchedule Json?` en Business
+(migración aditiva; jornada partida con intervalos por día; seed por psql, §9 del setup).
+Solapes: H1 SÍ protegía (`assertNoOverlap` en transacción) → protección de carrera gratis
+reutilizando `create`. Cliente desconocido: flujo viable con `ClientsService` sin refactor.
+Hallazgo extra: `create()` exigía userId → refactor mínimo retrocompatible
+(`createdById: string | null` + `source` con default MANUAL + exports de módulos +
+`ACTIVE_STATUSES` compartida). Cambios H1: solo esos 4, aprobados.
+
+**Decisiones clave.**
+- SDK `@anthropic-ai/sdk` adoptado (revirtiendo el fetch de T4, como estaba previsto): el bucle
+  multiplica llamadas por mensaje y los retries automáticos 429/5xx compensan. Bucle MANUAL, no
+  el tool runner beta (tope de iteraciones y control fino). El adapter de Meta sigue con fetch.
+- Rejilla fija de 30 min (horas naturales para WhatsApp) frente a paso=duración.
+- Tools SIEMPRE server-side con businessId de la conversación; el modelo solo ve serviceIds.
+- Metadata del OUT: tokens acumulados del bucle + `toolCalls: [{name, ok}]` + `phantomGuard`.
+
+**Los 4 fixes de la verificación en vivo (los bugs reales de un bot que actúa).**
+1. **El modelo no tiene reloj**: preguntó la fecha al cliente y construyó año pasado → fecha
+   actual (día de semana + año, zona negocio) inyectada en el prompt + guarda de fecha pasada
+   en la tool ("esa fecha ya pasó" en vez de lista vacía engañosa).
+2. **Recicló disponibilidad obsoleta del historial** ("no hay huecos" sin tool en el turno) →
+   regla de caducidad en el prompt + `diaSemana` lo calcula la tool (llamó "miércoles" al jueves).
+3. **Confirmaciones fantasma (crítico)**: 2 de 4 "citas confirmadas" no existían en BD →
+   guardia determinista en el engine: texto que pretende confirmar (heurística de participios;
+   la recapitulación legítima no dispara) sin `crear_cita ok` en el turno → 1 corrección
+   inyectada (interna del bucle, no se persiste) o supresión + fallback honesto + log ERROR.
+4. **Nombre de terceros perdido** (Fátima/Ester/Iván → todo "javier") → nota en la cita
+   "Reserva a nombre de: X (vía WhatsApp)" si difiere del Client (comparación laxa).
+   Patrón general aprendido: 1-3 son la misma familia — el modelo imita el historial en vez de
+   consultar; la defensa robusta es determinista en backend, el prompt solo primera línea.
+
+**Verificación.** lint/typecheck/build/prisma:validate + 102/102 tests (9 suites). En vivo
+(Javier): reserva completa → cita en la Agenda web; doble reserva → re-ofrece sin crear;
+domingo → cerrado; nombres de terceros en notas; metadata con tokens y toolCalls por psql.
+El log DEBUG de tools (añadido en fix 1) fue la herramienta de diagnóstico de los fixes 2 y 3.
+
+**Commit.** `feat(api): acciones de agenda del bot (disponibilidad real + creación con confirmación)`
+
+**Deuda nueva.** Reservas para terceros (producto); horario sin UI (psql); evolución de la
+heurística anti-fantasma a marcador estructural si resulta ruidosa. Cerrada parcialmente la de
+T4: retries de Claude resueltos por el SDK (queda el mensaje de cortesía ante fallo total).
 
 ### 2026-07-07 — H2 Tarea 4: BotEngine v0 con Claude Haiku (el bot conversa)
 
