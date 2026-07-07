@@ -4,7 +4,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AppointmentStatus, Prisma } from '../generated/prisma/client';
+import {
+  AppointmentSource,
+  AppointmentStatus,
+  Prisma,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CancelAppointmentDto } from './dto/cancel-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -13,7 +17,9 @@ import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 
 // Estados que ocupan hueco en la agenda → bloquean solapamiento y son los
 // únicos editables. CANCELLED/NO_SHOW/COMPLETED ni bloquean ni se editan.
-const ACTIVE_STATUSES: AppointmentStatus[] = [
+// Exportada (H2 T5): la disponibilidad del bot usa el MISMO criterio de
+// "cita que ocupa hueco" — una sola fuente de verdad, sin duplicar.
+export const ACTIVE_STATUSES: AppointmentStatus[] = [
   AppointmentStatus.SCHEDULED,
   AppointmentStatus.CONFIRMED,
 ];
@@ -57,10 +63,14 @@ export class AppointmentsService {
     return rows.map((row) => this.toDto(row));
   }
 
+  // createdById nullable + source (H2 T5): el bot crea citas sin usuario y
+  // con origen WHATSAPP; la web sigue pasando user.id y el default MANUAL.
+  // Validaciones y protección de solape en transacción: idénticas para ambos.
   async create(
     businessId: string,
-    createdById: string,
+    createdById: string | null,
     dto: CreateAppointmentDto,
+    source: AppointmentSource = AppointmentSource.MANUAL,
   ) {
     const startsAt = new Date(dto.startsAt);
     this.assertNotPast(startsAt);
@@ -84,7 +94,8 @@ export class AppointmentsService {
           endsAt,
           notes: dto.notes ?? null,
           createdById,
-          // status CONFIRMED y source MANUAL por default del schema.
+          source,
+          // status CONFIRMED por default del schema.
         },
         include: APPOINTMENT_INCLUDE,
       });

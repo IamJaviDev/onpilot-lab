@@ -109,17 +109,23 @@ model User {
 }
 
 model Business {
-  id        String         @id @default(uuid(7)) @db.Uuid
-  name      String
-  sector    BusinessSector
-  city      String?
-  phone     String?
-  email     String?
-  timezone  String         @default("Europe/Madrid")
-  isActive  Boolean        @default(true)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  deletedAt DateTime?
+  id             String         @id @default(uuid(7)) @db.Uuid
+  name           String
+  sector         BusinessSector
+  city           String?
+  phone          String?
+  email          String?
+  timezone       String         @default("Europe/Madrid")
+  // Horario semanal de apertura (H2 T5): claves mon..sun, cada una con
+  // intervalos [{start:"HH:mm", end:"HH:mm"}] en hora local del negocio
+  // (jornada partida = varios intervalos). Día ausente/vacío = cerrado.
+  // null = sin configurar → el bot no puede consultar disponibilidad.
+  // Validación en capa de aplicación; la UI de configuración es futura (H5).
+  weeklySchedule Json?
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
 
   members       BusinessMember[]
   clients       Client[]

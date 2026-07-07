@@ -347,3 +347,55 @@ Con el token de §7 y `ANTHROPIC_API_KEY` ya en `.env`:
 
 6. Al acabar la sesión de pruebas, `BOT_ENGINE_ENABLED=false` (o quitar la
    línea): el default es apagado.
+
+---
+
+## 9. Verificación en vivo de las acciones de agenda (Tarea 5)
+
+Requisito previo — **seed del horario de Fruteria Javier** (sin horario el bot
+no puede consultar disponibilidad). Jornada partida de lunes a viernes +
+sábado por la mañana; ajusta a tu gusto:
+
+```bash
+psql "$DATABASE_URL" <<'SQL'
+update "Business"
+set "weeklySchedule" = '{
+  "mon": [{"start":"09:00","end":"14:00"},{"start":"17:00","end":"20:00"}],
+  "tue": [{"start":"09:00","end":"14:00"},{"start":"17:00","end":"20:00"}],
+  "wed": [{"start":"09:00","end":"14:00"},{"start":"17:00","end":"20:00"}],
+  "thu": [{"start":"09:00","end":"14:00"},{"start":"17:00","end":"20:00"}],
+  "fri": [{"start":"09:00","end":"14:00"},{"start":"17:00","end":"20:00"}],
+  "sat": [{"start":"09:00","end":"14:00"}]
+}'::jsonb
+where id = '<BUSINESS_ID>';
+SQL
+```
+
+Formato: claves `mon..sun`, intervalos `{start,end}` en `HH:mm` (hora local
+del negocio, `Business.timezone`); día ausente = cerrado; un Json mal formado
+equivale a "sin horario" (el bot lo dirá y quedará un warn en el log).
+
+Con `BOT_ENGINE_ENABLED=true`, API + túnel (§8) y conversación limpia:
+
+1. **Reserva completa desde el móvil**: pide una cita → el bot pregunta
+   servicio/día → propone huecos (contrástalos contra la Agenda del frontend:
+   deben ser reales) → recapitula y pide confirmación explícita → confirma →
+   **la cita aparece en la Agenda de Onpilot** con origen WhatsApp.
+2. **Doble reserva del mismo hueco** (segunda conversación u otro móvil, o
+   creando antes la cita a mano en la web): el bot debe disculparse y
+   re-ofrecer alternativas SIN crear nada.
+3. **Día cerrado / sin huecos**: pide un domingo → "cerrado/no tengo huecos",
+   sin inventar horas.
+4. `psql` — la cita creada por el bot (sin usuario, origen WHATSAPP):
+
+   ```bash
+   psql "$DATABASE_URL" -c 'select "startsAt", "endsAt", status, source, "createdById" from "Appointment" order by "createdAt" desc limit 3;'
+   ```
+
+5. `psql` — metadata del flujo completo (tokens acumulados + toolCalls):
+
+   ```bash
+   psql "$DATABASE_URL" -c 'select left(body, 50), metadata from "Message" where direction = '"'"'OUT'"'"' order by "createdAt" desc limit 5;'
+   ```
+
+6. Al acabar, `BOT_ENGINE_ENABLED=false` si no quieres el bot activo.
