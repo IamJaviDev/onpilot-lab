@@ -1,19 +1,28 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { AppointmentsService } from '../appointments/appointments.service';
 import type { ClientsService } from '../clients/clients.service';
-import { AppointmentSource } from '../generated/prisma/client';
+import {
+  AppointmentSource,
+  ConversationStatus,
+} from '../generated/prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import { BotToolsService } from './bot-tools.service';
 
-// Tests de la ejecución server-side de las tools (T5). Lo que se protege:
-// multi-tenancy en cada query (businessId del contexto, jamás del modelo),
-// resolución de cliente (vinculado / por teléfono / creación mínima), la
-// carrera del hueco ocupado → error limpio SIN cita creada y legible por el
-// modelo (sin stack), y errores de negocio nunca lanzados.
+// Tests de la ejecución server-side de las tools (T5 + T6). Lo que se
+// protege: multi-tenancy en cada query (businessId del contexto, jamás del
+// modelo), resolución de cliente (vinculado / por teléfono / creación
+// mínima), la regla de identidad de T6 (solo citas de los Client del teléfono
+// de la conversación, con error ÚNICO e indistinguible para cita ajena /
+// pasada / inactiva / de otro negocio), el escalado real (updateMany con
+// id + businessId → PENDING_REVIEW), la carrera del hueco ocupado → error
+// limpio SIN cita creada y legible por el modelo (sin stack), y errores de
+// negocio nunca lanzados.
 
 const BUSINESS_ID = 'b0000000-0000-0000-0000-000000000001';
 const CONVERSATION_ID = 'c0000000-0000-0000-0000-000000000001';
-const SERVICE_ID = 's0000000-0000-0000-0000-000000000001';
+// Los ids que el modelo pasa como INPUT (serviceId, appointmentId) deben ser
+// UUID-shape válidos: la validación del FIX 3 corta antes de Prisma.
+const SERVICE_ID = 'e5000000-0000-0000-0000-000000000001';
 const CLIENT_ID = 'cl000000-0000-0000-0000-000000000001';
 const PHONE = '+34600000001';
 
@@ -28,11 +37,14 @@ interface Mocks {
     businessFindFirst: jest.Mock;
     serviceFindFirst: jest.Mock;
     appointmentFindMany: jest.Mock;
+    appointmentFindFirst: jest.Mock;
     conversationFindFirst: jest.Mock;
     conversationUpdateMany: jest.Mock;
     clientFindFirst: jest.Mock;
+    clientFindMany: jest.Mock;
   };
   appointmentsCreate: jest.Mock;
+  appointmentsCancel: jest.Mock;
   clientsCreate: jest.Mock;
 }
 
@@ -48,22 +60,30 @@ function makeService(): Mocks {
       durationMinutes: 30,
     }),
     appointmentFindMany: jest.fn().mockResolvedValue([]),
+    appointmentFindFirst: jest.fn().mockResolvedValue(null),
     conversationFindFirst: jest
       .fn()
       .mockResolvedValue({ clientId: null, phone: PHONE }),
     conversationUpdateMany: jest.fn().mockResolvedValue({ count: 1 }),
     clientFindFirst: jest.fn().mockResolvedValue(null),
+    clientFindMany: jest.fn().mockResolvedValue([]),
   };
 
   const prisma = {
     business: { findFirst: prismaMocks.businessFindFirst },
     service: { findFirst: prismaMocks.serviceFindFirst },
-    appointment: { findMany: prismaMocks.appointmentFindMany },
+    appointment: {
+      findMany: prismaMocks.appointmentFindMany,
+      findFirst: prismaMocks.appointmentFindFirst,
+    },
     conversation: {
       findFirst: prismaMocks.conversationFindFirst,
       updateMany: prismaMocks.conversationUpdateMany,
     },
-    client: { findFirst: prismaMocks.clientFindFirst },
+    client: {
+      findFirst: prismaMocks.clientFindFirst,
+      findMany: prismaMocks.clientFindMany,
+    },
   } as unknown as PrismaService;
 
   const appointmentsCreate = jest.fn().mockResolvedValue({
@@ -74,8 +94,10 @@ function makeService(): Mocks {
     startsAt: new Date(`${MONDAY}T08:00:00Z`),
     endsAt: new Date(`${MONDAY}T08:30:00Z`),
   });
+  const appointmentsCancel = jest.fn().mockResolvedValue({ id: 'cancelled' });
   const appointments = {
     create: appointmentsCreate,
+    cancel: appointmentsCancel,
   } as unknown as AppointmentsService;
 
   const clientsCreate = jest
@@ -89,6 +111,7 @@ function makeService(): Mocks {
     service: new BotToolsService(prisma, appointments, clients),
     prisma: prismaMocks,
     appointmentsCreate,
+    appointmentsCancel,
     clientsCreate,
   };
 }
@@ -134,7 +157,9 @@ describe('BotToolsService — consultar_disponibilidad', () => {
       CONTEXT,
       'consultar_disponibilidad',
       {
-        serviceId: 'ajeno',
+        // UUID-shape válido pero ajeno: pasa la validación de forma y cae en
+        // la query filtrada por businessId.
+        serviceId: 'e5000000-0000-0000-0000-0000000000ff',
         fecha: MONDAY,
       },
     );
@@ -246,6 +271,22 @@ describe('BotToolsService — consultar_disponibilidad', () => {
 
     expect(outcome.ok).toBe(false);
     expect(typeof outcome.result.error).toBe('string');
+    expect(m.prisma.appointmentFindMany).not.toHaveBeenCalled();
+  });
+
+  it('FIX 3: serviceId con forma no-UUID → error legible ANTES de cualquier query', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(
+      CONTEXT,
+      'consultar_disponibilidad',
+      { serviceId: '4', fecha: MONDAY },
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toContain('serviceId inválido');
+    expect(m.prisma.businessFindFirst).not.toHaveBeenCalled();
+    expect(m.prisma.serviceFindFirst).not.toHaveBeenCalled();
     expect(m.prisma.appointmentFindMany).not.toHaveBeenCalled();
   });
 });
@@ -414,6 +455,21 @@ describe('BotToolsService — crear_cita', () => {
     expect(m.clientsCreate).not.toHaveBeenCalled();
   });
 
+  it('FIX 3: serviceId con forma no-UUID → error legible ANTES de cualquier query', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      serviceId: '4',
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toContain('serviceId inválido');
+    expect(m.prisma.businessFindFirst).not.toHaveBeenCalled();
+    expect(m.appointmentsCreate).not.toHaveBeenCalled();
+    expect(m.clientsCreate).not.toHaveBeenCalled();
+  });
+
   it('fallo inesperado → error genérico legible (red de seguridad), nunca lanza', async () => {
     const m = makeService();
     m.appointmentsCreate.mockRejectedValue(new Error('db down'));
@@ -433,5 +489,366 @@ describe('BotToolsService — crear_cita', () => {
 
     expect(outcome.ok).toBe(false);
     expect(outcome.result.error).toContain('Herramienta desconocida');
+  });
+});
+
+const APPOINTMENT_ID = 'a0000000-0000-0000-0000-000000000099';
+
+describe('BotToolsService — listar_mis_citas (T6, identidad por teléfono)', () => {
+  it('devuelve las citas del cliente del teléfono con fecha/hora locales, diaSemana y filtros completos', async () => {
+    const m = makeService();
+    m.prisma.clientFindMany.mockResolvedValue([{ id: CLIENT_ID }]);
+    m.prisma.appointmentFindMany.mockResolvedValue([
+      {
+        id: APPOINTMENT_ID,
+        // 10:00 local Madrid en julio (UTC+2) del lunes 13.
+        startsAt: new Date(`${MONDAY}T08:00:00Z`),
+        notes: null,
+        service: { name: 'Cesta de fruta' },
+      },
+    ]);
+
+    const outcome = await m.service.execute(CONTEXT, 'listar_mis_citas', {});
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toEqual({
+      citas: [
+        {
+          appointmentId: APPOINTMENT_ID,
+          servicio: 'Cesta de fruta',
+          fecha: MONDAY,
+          hora: '10:00',
+          diaSemana: 'lunes',
+        },
+      ],
+      hayMas: false,
+      // FIX 2: instrucción en el punto de uso (el modelo mandó el ordinal).
+      aviso:
+        'Para cancelar_cita usa el appointmentId EXACTO (UUID completo), nunca el número de orden.',
+    });
+
+    // La identidad sale del teléfono de la conversación (multi-tenant).
+    expect(m.prisma.clientFindMany).toHaveBeenCalledWith({
+      where: { businessId: BUSINESS_ID, phone: PHONE, deletedAt: null },
+      select: { id: true },
+    });
+    // La query de citas lleva TODOS los filtros: negocio, clientes del
+    // teléfono, activas, no borradas y futuras.
+    const where = (
+      m.prisma.appointmentFindMany.mock.calls[0] as [
+        {
+          where: {
+            businessId: string;
+            clientId: { in: string[] };
+            status: { in: string[] };
+            deletedAt: null;
+            startsAt: { gt: Date };
+          };
+        },
+      ]
+    )[0].where;
+    expect(where.businessId).toBe(BUSINESS_ID);
+    expect(where.clientId.in).toEqual([CLIENT_ID]);
+    expect(where.status.in).toEqual(['SCHEDULED', 'CONFIRMED']);
+    expect(where.deletedAt).toBeNull();
+    expect(where.startsAt.gt).toBeInstanceOf(Date);
+  });
+
+  it('una cita de OTRO cliente del mismo negocio no entra: el filtro clientId.in solo lleva los ids del teléfono', async () => {
+    const m = makeService();
+    m.prisma.clientFindMany.mockResolvedValue([{ id: CLIENT_ID }]);
+
+    await m.service.execute(CONTEXT, 'listar_mis_citas', {});
+
+    const where = (
+      m.prisma.appointmentFindMany.mock.calls[0] as [
+        { where: { clientId: { in: string[] } } },
+      ]
+    )[0].where;
+    // Un Client ajeno (otro teléfono) jamás aparece en el in: la BD no puede
+    // devolver sus citas.
+    expect(where.clientId.in).toEqual([CLIENT_ID]);
+  });
+
+  it('suma el clientId ya vinculado a la conversación (si sigue activo) a los ids del teléfono', async () => {
+    const m = makeService();
+    const linkedId = 'cl000000-0000-0000-0000-000000000002';
+    m.prisma.conversationFindFirst.mockResolvedValue({
+      clientId: linkedId,
+      phone: PHONE,
+    });
+    m.prisma.clientFindMany.mockResolvedValue([{ id: CLIENT_ID }]);
+    m.prisma.clientFindFirst.mockResolvedValue({ id: linkedId });
+
+    await m.service.execute(CONTEXT, 'listar_mis_citas', {});
+
+    const where = (
+      m.prisma.appointmentFindMany.mock.calls[0] as [
+        { where: { clientId: { in: string[] } } },
+      ]
+    )[0].where;
+    expect(where.clientId.in).toEqual(
+      expect.arrayContaining([CLIENT_ID, linkedId]),
+    );
+    // La verificación del vinculado va filtrada por businessId.
+    const linkedWhere = (
+      m.prisma.clientFindFirst.mock.calls[0] as [
+        { where: { id: string; businessId: string } },
+      ]
+    )[0].where;
+    expect(linkedWhere.businessId).toBe(BUSINESS_ID);
+  });
+
+  it('extrae "a nombre de" de la nota de tercero de T5', async () => {
+    const m = makeService();
+    m.prisma.clientFindMany.mockResolvedValue([{ id: CLIENT_ID }]);
+    m.prisma.appointmentFindMany.mockResolvedValue([
+      {
+        id: APPOINTMENT_ID,
+        startsAt: new Date(`${MONDAY}T08:00:00Z`),
+        notes: 'Reserva a nombre de: Iván (vía WhatsApp)',
+        service: { name: 'Cesta de fruta' },
+      },
+    ]);
+
+    const outcome = await m.service.execute(CONTEXT, 'listar_mis_citas', {});
+
+    const citas = outcome.result.citas as Array<{ aNombreDe?: string }>;
+    expect(citas[0].aNombreDe).toBe('Iván');
+  });
+
+  it('tope de 5 citas para el modelo, con hayMas', async () => {
+    const m = makeService();
+    m.prisma.clientFindMany.mockResolvedValue([{ id: CLIENT_ID }]);
+    m.prisma.appointmentFindMany.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => ({
+        id: `a-${i}`,
+        startsAt: new Date(Date.UTC(2026, 6, 13, 8, i * 10)),
+        notes: null,
+        service: { name: 'Cesta de fruta' },
+      })),
+    );
+
+    const outcome = await m.service.execute(CONTEXT, 'listar_mis_citas', {});
+
+    expect((outcome.result.citas as unknown[]).length).toBe(5);
+    expect(outcome.result.hayMas).toBe(true);
+  });
+
+  it('teléfono sin Client → lista vacía con motivo, sin tocar la tabla de citas', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(CONTEXT, 'listar_mis_citas', {});
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toMatchObject({
+      citas: [],
+      motivo: 'No hay citas futuras activas para este teléfono.',
+    });
+    expect(m.prisma.appointmentFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('BotToolsService — cancelar_cita (T6)', () => {
+  const CANCEL_ERROR =
+    'No encuentro esa cita entre las citas futuras activas de este teléfono.';
+
+  function withOwnAppointment(m: Mocks) {
+    m.prisma.clientFindMany.mockResolvedValue([{ id: CLIENT_ID }]);
+    m.prisma.appointmentFindFirst.mockResolvedValue({
+      id: APPOINTMENT_ID,
+      startsAt: new Date(`${MONDAY}T08:00:00Z`),
+      service: { name: 'Cesta de fruta' },
+    });
+  }
+
+  it('feliz: verifica identidad + futura + activa y reutiliza AppointmentsService.cancel (soft, con reason)', async () => {
+    const m = makeService();
+    withOwnAppointment(m);
+
+    const outcome = await m.service.execute(CONTEXT, 'cancelar_cita', {
+      appointmentId: APPOINTMENT_ID,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toEqual({
+      cancelada: true,
+      cita: { servicio: 'Cesta de fruta', fecha: MONDAY, hora: '10:00' },
+    });
+    expect(m.appointmentsCancel).toHaveBeenCalledWith(
+      BUSINESS_ID,
+      APPOINTMENT_ID,
+      { reason: 'Cancelada por el cliente vía WhatsApp' },
+    );
+
+    // Defensa dura ANTES de cancelar: id + businessId + cliente del teléfono
+    // + activa + no borrada + futura.
+    const where = (
+      m.prisma.appointmentFindFirst.mock.calls[0] as [
+        {
+          where: {
+            id: string;
+            businessId: string;
+            clientId: { in: string[] };
+            status: { in: string[] };
+            deletedAt: null;
+            startsAt: { gt: Date };
+          };
+        },
+      ]
+    )[0].where;
+    expect(where.id).toBe(APPOINTMENT_ID);
+    expect(where.businessId).toBe(BUSINESS_ID);
+    expect(where.clientId.in).toEqual([CLIENT_ID]);
+    expect(where.status.in).toEqual(['SCHEDULED', 'CONFIRMED']);
+    expect(where.deletedAt).toBeNull();
+    expect(where.startsAt.gt).toBeInstanceOf(Date);
+  });
+
+  it('cita ajena / pasada / inactiva / de otro negocio → el MISMO error byte a byte, sin cancelar nada', async () => {
+    // Los cuatro casos caen en el mismo findFirst filtrado → null. Se
+    // ejecutan las cuatro invocaciones y se comprueba que el texto es
+    // idéntico (nada filtra CUÁL fue el motivo). El id es UUID-shape válido:
+    // pasa la validación de forma del FIX 3 y cae en la query.
+    const errors: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const m = makeService();
+      m.prisma.clientFindMany.mockResolvedValue([{ id: CLIENT_ID }]);
+      m.prisma.appointmentFindFirst.mockResolvedValue(null);
+
+      const outcome = await m.service.execute(CONTEXT, 'cancelar_cita', {
+        appointmentId: APPOINTMENT_ID,
+      });
+
+      expect(outcome.ok).toBe(false);
+      expect(m.appointmentsCancel).not.toHaveBeenCalled();
+      errors.push(outcome.result.error as string);
+    }
+
+    expect(new Set(errors).size).toBe(1);
+    expect(errors[0]).toBe(CANCEL_ERROR);
+  });
+
+  it('FIX 3: appointmentId con forma no-UUID (el ordinal "4" del log) → error legible ANTES de cualquier query', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(CONTEXT, 'cancelar_cita', {
+      appointmentId: '4',
+    });
+
+    expect(outcome.ok).toBe(false);
+    const error = outcome.result.error as string;
+    expect(error).toContain('appointmentId inválido');
+    expect(error).toContain('listar_mis_citas');
+    // Ni identidad, ni cita, ni cancelación: cero queries (nada de P2023).
+    expect(m.prisma.conversationFindFirst).not.toHaveBeenCalled();
+    expect(m.prisma.clientFindMany).not.toHaveBeenCalled();
+    expect(m.prisma.appointmentFindFirst).not.toHaveBeenCalled();
+    expect(m.appointmentsCancel).not.toHaveBeenCalled();
+  });
+
+  it('teléfono sin Client → mismo error indistinguible, sin ni siquiera consultar citas', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(CONTEXT, 'cancelar_cita', {
+      appointmentId: APPOINTMENT_ID,
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toBe(CANCEL_ERROR);
+    expect(m.prisma.appointmentFindFirst).not.toHaveBeenCalled();
+    expect(m.appointmentsCancel).not.toHaveBeenCalled();
+  });
+
+  it('carrera (la cita cambió entre verificación y cancelación) → error legible sin stack', async () => {
+    const m = makeService();
+    withOwnAppointment(m);
+    m.appointmentsCancel.mockRejectedValue(
+      new ConflictException('Appointment is in a terminal state'),
+    );
+
+    const outcome = await m.service.execute(CONTEXT, 'cancelar_cita', {
+      appointmentId: APPOINTMENT_ID,
+    });
+
+    expect(outcome.ok).toBe(false);
+    const error = outcome.result.error as string;
+    expect(error).toContain('acaba de cambiar');
+    expect(error).not.toMatch(/ConflictException|Error:|\n\s+at /);
+  });
+
+  it('input inválido → error de parámetros, sin tocar nada', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(CONTEXT, 'cancelar_cita', {});
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toContain('appointmentId');
+    expect(m.prisma.appointmentFindFirst).not.toHaveBeenCalled();
+    expect(m.appointmentsCancel).not.toHaveBeenCalled();
+  });
+});
+
+describe('BotToolsService — escalar_a_humano (T6)', () => {
+  it('motivo válido → updateMany con id + businessId a PENDING_REVIEW y eco al modelo', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(CONTEXT, 'escalar_a_humano', {
+      motivo: 'PIDE_HUMANO',
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toEqual({ escalado: true, motivo: 'PIDE_HUMANO' });
+    expect(m.prisma.conversationUpdateMany).toHaveBeenCalledWith({
+      where: { id: CONVERSATION_ID, businessId: BUSINESS_ID },
+      data: { status: ConversationStatus.PENDING_REVIEW },
+    });
+  });
+
+  it('motivo fuera del enum → error de parámetros, sin tocar la conversación', async () => {
+    const m = makeService();
+
+    const outcome = await m.service.execute(CONTEXT, 'escalar_a_humano', {
+      motivo: 'ME_ABURRO',
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toContain('motivo debe ser uno de');
+    expect(m.prisma.conversationUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('conversación no encontrada (count 0) → error de negocio', async () => {
+    const m = makeService();
+    m.prisma.conversationUpdateMany.mockResolvedValue({ count: 0 });
+
+    const outcome = await m.service.execute(CONTEXT, 'escalar_a_humano', {
+      motivo: 'URGENCIA',
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toBe('Conversación no disponible.');
+  });
+});
+
+describe('BotToolsService — transitionToPendingReview (única escritura de status desde el bot)', () => {
+  it('actualiza con id + businessId y devuelve true', async () => {
+    const m = makeService();
+
+    await expect(m.service.transitionToPendingReview(CONTEXT)).resolves.toBe(
+      true,
+    );
+    expect(m.prisma.conversationUpdateMany).toHaveBeenCalledWith({
+      where: { id: CONVERSATION_ID, businessId: BUSINESS_ID },
+      data: { status: ConversationStatus.PENDING_REVIEW },
+    });
+  });
+
+  it('nunca lanza: un fallo de BD devuelve false (el fallback sale igualmente)', async () => {
+    const m = makeService();
+    m.prisma.conversationUpdateMany.mockRejectedValue(new Error('db down'));
+
+    await expect(m.service.transitionToPendingReview(CONTEXT)).resolves.toBe(
+      false,
+    );
   });
 });

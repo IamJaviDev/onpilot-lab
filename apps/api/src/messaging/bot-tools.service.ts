@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import type Anthropic from '@anthropic-ai/sdk';
 import { DateTime } from 'luxon';
@@ -11,13 +12,40 @@ import {
   AppointmentsService,
 } from '../appointments/appointments.service';
 import { ClientsService } from '../clients/clients.service';
-import { AppointmentSource } from '../generated/prisma/client';
+import {
+  AppointmentSource,
+  ConversationStatus,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { computeFreeSlots, parseWeeklySchedule } from './availability.util';
 
 // Máximo de huecos que se devuelven al modelo (no inflar tokens; si hay más,
 // se indica con masHuecos para que el bot pueda ofrecer "y más").
 const MAX_SLOTS_FOR_MODEL = 8;
+
+// Máximo de citas del cliente que se devuelven al modelo (SPEC T6: ~5).
+const MAX_APPOINTMENTS_FOR_MODEL = 5;
+
+// Motivos de escalado (docs/09: triggers). Se persisten en la metadata del
+// Message OUT para auditar POR QUÉ escaló el bot.
+export const ESCALATION_MOTIVOS = [
+  'PIDE_HUMANO',
+  'FRUSTRACION',
+  'URGENCIA',
+  'NO_PUEDO_RESOLVER',
+  'FUERA_DE_SCOPE',
+] as const;
+export type EscalationMotivo = (typeof ESCALATION_MOTIVOS)[number];
+
+// Error ÚNICO e indistinguible de cancelar_cita para cita ajena / pasada /
+// inactiva / de otro negocio: los cuatro casos caen en el mismo findFirst
+// filtrado, y el texto no puede filtrar cuál fue (regla de identidad T6).
+const CANCEL_NOT_FOUND_ERROR =
+  'No encuentro esa cita entre las citas futuras activas de este teléfono.';
+
+// Nota que crear_cita deja cuando la reserva es para un tercero (T5);
+// listar_mis_citas la parsea para devolver "a nombre de".
+const THIRD_PARTY_NOTE_RE = /^Reserva a nombre de: (.+) \(vía WhatsApp\)$/;
 
 /**
  * Definiciones de las tools del bot (schema tipado para la API de Anthropic).
@@ -75,6 +103,58 @@ export const BOT_TOOL_DEFINITIONS: Anthropic.Tool[] = [
       required: ['serviceId', 'fechaHora', 'nombreCliente'],
     },
   },
+  {
+    name: 'listar_mis_citas',
+    description:
+      'Lista las citas FUTURAS activas del cliente de esta conversación ' +
+      '(identificado por su teléfono). Úsala antes de cancelar o cambiar ' +
+      'una cita, para identificarla con su appointmentId real.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'cancelar_cita',
+    description:
+      'Cancela una cita del cliente de esta conversación. Llamar SOLO tras ' +
+      'la confirmación explícita del cliente, y con el appointmentId EXACTO ' +
+      '(UUID completo) devuelto por listar_mis_citas en esta misma gestión — ' +
+      'JAMÁS el número de orden del listado ni un id abreviado o inventado.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        appointmentId: {
+          type: 'string',
+          description:
+            'appointmentId EXACTO (UUID completo) tal cual lo devolvió ' +
+            'listar_mis_citas',
+        },
+      },
+      required: ['appointmentId'],
+    },
+  },
+  {
+    name: 'escalar_a_humano',
+    description:
+      'Pasa la conversación al equipo humano del negocio: el bot deja de ' +
+      'responder hasta que una persona la revise. Llamar cuando el cliente ' +
+      'pide una persona, hay frustración o urgencia, no puedes resolver, o ' +
+      'la petición está fuera de tus capacidades. Tras el éxito, despídete ' +
+      'indicando que el equipo le responderá aquí mismo.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        motivo: {
+          type: 'string',
+          enum: [...ESCALATION_MOTIVOS],
+          description: 'Motivo del escalado',
+        },
+      },
+      required: ['motivo'],
+    },
+  },
 ];
 
 /**
@@ -97,12 +177,30 @@ export interface BotToolOutcome {
 const FECHA_RE = /^\d{4}-\d{2}-\d{2}$/;
 const FECHA_HORA_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
+// FIX 3 post-T6: las columnas de id son @db.Uuid — un id malformado del
+// modelo (visto en vivo: appointmentId "4", el ordinal del listado) revienta
+// en Prisma con P2023. TODO input de id se valida en forma ANTES de cualquier
+// query, con error legible que permita al modelo autocorregirse (re-listar).
+const UUID_SHAPE_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const INVALID_APPOINTMENT_ID_ERROR =
+  'appointmentId inválido: usa el identificador EXACTO (UUID completo) que ' +
+  'devolvió listar_mis_citas, nunca el número de orden. Vuelve a llamar a ' +
+  'listar_mis_citas si no lo tienes.';
+
+const INVALID_SERVICE_ID_ERROR =
+  'serviceId inválido: usa el id EXACTO (UUID completo) de la lista de ' +
+  'servicios del negocio.';
+
 /**
- * Ejecución server-side de las tools del bot (H2 T5). Multi-tenancy en cada
- * query (businessId del contexto); la creación reutiliza AppointmentsService
- * (validaciones H1 + protección de solape en transacción) y ClientsService
- * (cliente mínimo con teléfono único). Nunca lanza: todo fallo se convierte
- * en un { error } legible por el modelo.
+ * Ejecución server-side de las tools del bot (H2 T5 + T6). Multi-tenancy en
+ * cada query (businessId del contexto); crear/cancelar reutilizan
+ * AppointmentsService (validaciones H1, solape en transacción, soft-cancel) y
+ * ClientsService (cliente mínimo con teléfono único). Las tools sobre citas
+ * existentes aplican además la regla de identidad T6: solo citas de los
+ * Client del teléfono de la conversación. Nunca lanza: todo fallo se
+ * convierte en un { error } legible por el modelo.
  */
 @Injectable()
 export class BotToolsService {
@@ -131,6 +229,12 @@ export class BotToolsService {
           return await this.consultarDisponibilidad(context, input);
         case 'crear_cita':
           return await this.crearCita(context, input);
+        case 'listar_mis_citas':
+          return await this.listarMisCitas(context);
+        case 'cancelar_cita':
+          return await this.cancelarCita(context, input);
+        case 'escalar_a_humano':
+          return await this.escalarAHumano(context, input);
         default:
           this.logger.warn(`Unknown bot tool requested: ${toolName}`);
           return this.businessError(`Herramienta desconocida: ${toolName}`);
@@ -161,6 +265,9 @@ export class BotToolsService {
       return this.businessError(
         'Parámetros inválidos: se necesita serviceId y fecha en formato YYYY-MM-DD.',
       );
+    }
+    if (!UUID_SHAPE_RE.test(input.serviceId)) {
+      return this.businessError(INVALID_SERVICE_ID_ERROR);
     }
 
     const business = await this.prisma.business.findFirst({
@@ -293,6 +400,9 @@ export class BotToolsService {
         'Parámetros inválidos: se necesita serviceId, fechaHora (YYYY-MM-DDTHH:mm) y nombreCliente.',
       );
     }
+    if (!UUID_SHAPE_RE.test(input.serviceId)) {
+      return this.businessError(INVALID_SERVICE_ID_ERROR);
+    }
 
     const business = await this.prisma.business.findFirst({
       where: { id: context.businessId, deletedAt: null },
@@ -368,6 +478,250 @@ export class BotToolsService {
       }
       throw error; // inesperado → red de seguridad de execute()
     }
+  }
+
+  /**
+   * Citas FUTURAS activas del cliente del teléfono de la conversación (regla
+   * de identidad T6: la búsqueda parte SIEMPRE de los Client resueltos por
+   * (businessId, phone) — nadie lista citas de otro dando un nombre).
+   */
+  private async listarMisCitas(
+    context: BotToolContext,
+  ): Promise<BotToolOutcome> {
+    const business = await this.prisma.business.findFirst({
+      where: { id: context.businessId, deletedAt: null },
+      select: { timezone: true },
+    });
+    if (!business) return this.businessError('Negocio no disponible.');
+
+    const resolved = await this.resolveClientIdsForPhone(context);
+    if ('error' in resolved) return this.businessError(resolved.error);
+
+    const rows =
+      resolved.ids.length === 0
+        ? []
+        : await this.prisma.appointment.findMany({
+            where: {
+              businessId: context.businessId,
+              clientId: { in: resolved.ids },
+              deletedAt: null,
+              status: { in: ACTIVE_STATUSES },
+              startsAt: { gt: new Date() },
+            },
+            orderBy: { startsAt: 'asc' },
+            take: MAX_APPOINTMENTS_FOR_MODEL + 1,
+            select: {
+              id: true,
+              startsAt: true,
+              notes: true,
+              service: { select: { name: true } },
+            },
+          });
+
+    const hayMas = rows.length > MAX_APPOINTMENTS_FOR_MODEL;
+    const citas = rows.slice(0, MAX_APPOINTMENTS_FOR_MODEL).map((row) => {
+      const local = DateTime.fromJSDate(row.startsAt).setZone(
+        business.timezone,
+      );
+      const aNombreDe = row.notes?.match(THIRD_PARTY_NOTE_RE)?.[1];
+      return {
+        appointmentId: row.id,
+        servicio: row.service.name,
+        fecha: local.toFormat('yyyy-MM-dd'),
+        hora: local.toFormat('HH:mm'),
+        diaSemana: local.setLocale('es').toFormat('cccc'),
+        ...(aNombreDe ? { aNombreDe } : {}),
+      };
+    });
+
+    return {
+      ok: true,
+      result: {
+        citas,
+        hayMas,
+        ...(citas.length === 0
+          ? { motivo: 'No hay citas futuras activas para este teléfono.' }
+          : {
+              // FIX 2 post-T6: instrucción en el punto de uso — en vivo el
+              // modelo mandó a cancelar_cita el ordinal del listado ("4").
+              aviso:
+                'Para cancelar_cita usa el appointmentId EXACTO (UUID completo), nunca el número de orden.',
+            }),
+      },
+    };
+  }
+
+  /**
+   * Cancela una cita del cliente del teléfono. Defensa dura ANTES de tocar
+   * nada: la cita debe pertenecer a un Client del teléfono, ser futura y
+   * activa; si no, el error es ÚNICO e indistinguible (ajena / pasada /
+   * inactiva / de otro negocio devuelven el mismo texto, sin filtrar cuál).
+   * La cancelación en sí reutiliza AppointmentsService.cancel de H1 (soft,
+   * status CANCELLED, jamás delete).
+   */
+  private async cancelarCita(
+    context: BotToolContext,
+    rawInput: unknown,
+  ): Promise<BotToolOutcome> {
+    const input = rawInput as { appointmentId?: unknown };
+    const appointmentId =
+      typeof input?.appointmentId === 'string'
+        ? input.appointmentId.trim()
+        : '';
+    // FIX 3: forma UUID validada ANTES de cualquier query (visto en vivo:
+    // el modelo mandó el ordinal "4" → P2023 de Prisma → error opaco). El
+    // mensaje guía la autocorrección: re-listar y usar el id exacto.
+    if (!UUID_SHAPE_RE.test(appointmentId)) {
+      return this.businessError(INVALID_APPOINTMENT_ID_ERROR);
+    }
+
+    const business = await this.prisma.business.findFirst({
+      where: { id: context.businessId, deletedAt: null },
+      select: { timezone: true },
+    });
+    if (!business) return this.businessError('Negocio no disponible.');
+
+    const resolved = await this.resolveClientIdsForPhone(context);
+    if ('error' in resolved) return this.businessError(resolved.error);
+    if (resolved.ids.length === 0) {
+      return this.businessError(CANCEL_NOT_FOUND_ERROR);
+    }
+
+    const appointment = await this.prisma.appointment.findFirst({
+      where: {
+        id: appointmentId,
+        businessId: context.businessId,
+        clientId: { in: resolved.ids },
+        deletedAt: null,
+        status: { in: ACTIVE_STATUSES },
+        startsAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        startsAt: true,
+        service: { select: { name: true } },
+      },
+    });
+    if (!appointment) return this.businessError(CANCEL_NOT_FOUND_ERROR);
+
+    try {
+      await this.appointments.cancel(context.businessId, appointment.id, {
+        reason: 'Cancelada por el cliente vía WhatsApp',
+      });
+    } catch (error) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ConflictException
+      ) {
+        // Carrera: la cita cambió entre la verificación y la cancelación
+        // (p. ej. el negocio la completó/canceló a la vez).
+        return this.businessError(
+          'Esa cita acaba de cambiar y ya no se puede cancelar. Consulta tus citas de nuevo con listar_mis_citas.',
+        );
+      }
+      throw error; // inesperado → red de seguridad de execute()
+    }
+
+    const local = DateTime.fromJSDate(appointment.startsAt).setZone(
+      business.timezone,
+    );
+    return {
+      ok: true,
+      result: {
+        cancelada: true,
+        cita: {
+          servicio: appointment.service.name,
+          fecha: local.toFormat('yyyy-MM-dd'),
+          hora: local.toFormat('HH:mm'),
+        },
+      },
+    };
+  }
+
+  /**
+   * Escalado real (T6): transición de la conversación a PENDING_REVIEW. Tras
+   * esto el guard de estados de T3 garantiza que el siguiente IN no dispara
+   * al bot. El motivo viaja al modelo solo como eco; la auditoría real la
+   * escribe el BotEngine en la metadata del Message OUT.
+   */
+  private async escalarAHumano(
+    context: BotToolContext,
+    rawInput: unknown,
+  ): Promise<BotToolOutcome> {
+    const input = rawInput as { motivo?: unknown };
+    const motivo = ESCALATION_MOTIVOS.find((m) => m === input?.motivo);
+    if (!motivo) {
+      return this.businessError(
+        `Parámetros inválidos: motivo debe ser uno de ${ESCALATION_MOTIVOS.join(', ')}.`,
+      );
+    }
+
+    const escalated = await this.transitionToPendingReview(context);
+    if (!escalated) return this.businessError('Conversación no disponible.');
+
+    return { ok: true, result: { escalado: true, motivo } };
+  }
+
+  /**
+   * ÚNICA ruta de escritura de Conversation.status desde el bot (SPEC T6):
+   * BOT_ACTIVE → PENDING_REVIEW. La usan la tool escalar_a_humano y el
+   * BotEngine cuando un fallback promete "aviso al equipo" (opción A: si se
+   * dice, se hace). La vuelta PENDING_REVIEW → BOT_ACTIVE es manual, fuera
+   * del bot. Nunca lanza: false = no se pudo escalar (el llamante loguea).
+   */
+  async transitionToPendingReview(context: BotToolContext): Promise<boolean> {
+    try {
+      const result = await this.prisma.conversation.updateMany({
+        where: { id: context.conversationId, businessId: context.businessId },
+        data: { status: ConversationStatus.PENDING_REVIEW },
+      });
+      return result.count > 0;
+    } catch (error) {
+      this.logger.error(
+        `transitionToPendingReview failed (conversationId=${context.conversationId})`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Identidad por teléfono (T6): todos los Client activos del negocio con el
+   * teléfono E.164 de la conversación, más el clientId ya vinculado si sigue
+   * activo (también derivado de teléfono; cubre el desfase de normalización
+   * H1↔E.164 del devlog). El modelo jamás elige el cliente.
+   */
+  private async resolveClientIdsForPhone(
+    context: BotToolContext,
+  ): Promise<{ ids: string[] } | { error: string }> {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: context.conversationId, businessId: context.businessId },
+      select: { clientId: true, phone: true },
+    });
+    if (!conversation) return { error: 'Conversación no disponible.' };
+
+    const byPhone = await this.prisma.client.findMany({
+      where: {
+        businessId: context.businessId,
+        phone: conversation.phone,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    const ids = new Set(byPhone.map((c) => c.id));
+    if (conversation.clientId && !ids.has(conversation.clientId)) {
+      const linked = await this.prisma.client.findFirst({
+        where: {
+          id: conversation.clientId,
+          businessId: context.businessId,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (linked) ids.add(linked.id);
+    }
+    return { ids: [...ids] };
   }
 
   /**

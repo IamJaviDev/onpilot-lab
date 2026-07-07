@@ -3,17 +3,18 @@ import { MessageDirection } from '../generated/prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
   BotEngineService,
-  looksLikeBookingConfirmation,
+  detectPhantomClaims,
   mapHistoryToTurns,
 } from './bot-engine.service';
 import type { BotToolsService } from './bot-tools.service';
 
-// Tests del BotEngine (T4 + T5) con el SDK de Anthropic y Prisma mockeados.
-// Lo que se protege: las queries van SIEMPRE filtradas por businessId, el
-// bucle de tool use ejecuta las tools server-side y respeta el tope de 5
-// iteraciones (fallback, no bucle infinito), la metadata acumula los tokens
-// de todas las iteraciones, y cualquier fallo del SDK devuelve null sin
-// lanzar.
+// Tests del BotEngine (T4 + T5 + T6) con el SDK de Anthropic y Prisma
+// mockeados. Lo que se protege: las queries van SIEMPRE filtradas por
+// businessId, el bucle de tool use ejecuta las tools server-side y respeta el
+// tope de 5 iteraciones, la metadata acumula tokens y audita el escalado, la
+// guardia anti-fantasma cubre reserva/cancelación/escalado, todo fallback que
+// promete equipo ESCALA de verdad (opción A de T6), y cualquier fallo del SDK
+// devuelve null sin lanzar.
 
 const mockMessagesCreate = jest.fn();
 
@@ -39,6 +40,7 @@ function makeService(): {
   service: BotEngineService;
   mocks: PrismaMocks;
   toolsExecute: jest.Mock;
+  transitionToPendingReview: jest.Mock;
 } {
   const config = {
     getOrThrow: (key: string) => {
@@ -82,12 +84,17 @@ function makeService(): {
     ok: true,
     result: { slots: ['2026-07-13T10:00'] },
   });
-  const botTools = { execute: toolsExecute } as unknown as BotToolsService;
+  const transitionToPendingReview = jest.fn().mockResolvedValue(true);
+  const botTools = {
+    execute: toolsExecute,
+    transitionToPendingReview,
+  } as unknown as BotToolsService;
 
   return {
     service: new BotEngineService(config, prisma, botTools),
     mocks,
     toolsExecute,
+    transitionToPendingReview,
   };
 }
 
@@ -157,6 +164,9 @@ describe('BotEngineService', () => {
     expect(args.tools.map((t) => t.name)).toEqual([
       'consultar_disponibilidad',
       'crear_cita',
+      'listar_mis_citas',
+      'cancelar_cita',
+      'escalar_a_humano',
     ]);
     expect(args.system).toContain('Fruteria Javier');
     expect(args.system).toContain(`id: ${SERVICE_ID}`);
@@ -225,8 +235,8 @@ describe('BotEngineService', () => {
     });
   });
 
-  it('tope de 5 iteraciones: corta el bucle con la respuesta de fallback', async () => {
-    const { service, toolsExecute } = makeService();
+  it('tope de 5 iteraciones: corta el bucle con la respuesta de fallback y ESCALA de verdad (opción A)', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
     mockMessagesCreate.mockResolvedValue(
       toolUseResponse('tu_x', 'consultar_disponibilidad', { fecha: 'x' }),
     );
@@ -240,6 +250,14 @@ describe('BotEngineService', () => {
     expect(toolsExecute).toHaveBeenCalledTimes(5);
     expect(reply?.body).toContain('aviso al equipo');
     expect(reply?.metadata.toolCalls).toHaveLength(5);
+    // El fallback promete equipo → conversación a PENDING_REVIEW + auditoría.
+    expect(transitionToPendingReview).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+    expect(reply?.metadata.escalation).toEqual({
+      motivo: 'NO_PUEDO_RESOLVER',
+    });
   });
 
   it('multi-tenancy: TODAS las queries van filtradas por businessId', async () => {
@@ -368,7 +386,7 @@ describe('BotEngineService', () => {
   });
 });
 
-describe('looksLikeBookingConfirmation (detector puro de la guardia anti-fantasma)', () => {
+describe('detectPhantomClaims (detector puro de la guardia anti-fantasma, T5 + T6)', () => {
   it.each([
     [
       'participio + cita',
@@ -380,32 +398,76 @@ describe('looksLikeBookingConfirmation (detector puro de la guardia anti-fantasm
     ],
     ['participio + reserva', '¡Perfecto, Ana! Tu reserva está confirmada.'],
     ['cita creada', 'Cita creada: Cesta de fruta, lunes 13 a las 10:00.'],
-  ])('dispara: %s', (_label, text) => {
-    expect(looksLikeBookingConfirmation(text)).toBe(true);
+  ])('reserva — dispara: %s', (_label, text) => {
+    expect(detectPhantomClaims(text)).toEqual(['booking']);
+  });
+
+  it.each([
+    ['participio + cita', 'Tu cita del jueves queda cancelada.'],
+    ['perfecto + cita', '¡Hecho! He cancelado tu cita del jueves.'],
+    ['cambio', 'Tu cita queda cambiada al viernes a las 10:00.'],
+    ['anulada + reserva', 'Listo, tu reserva está anulada.'],
+    ['reprogramada', 'Tu cita ha sido reprogramada al viernes.'],
+  ])('cancelación/cambio — dispara: %s', (_label, text) => {
+    expect(detectPhantomClaims(text)).toEqual(['cancellation']);
+  });
+
+  it.each([
+    ['aviso al equipo', 'Aviso al equipo para que te atiendan.'],
+    ['perfecto', 'Ya he trasladado tu consulta al equipo.'],
+    ['te paso con persona', 'Te paso con una persona del equipo.'],
+    [
+      'equipo avisado (orden inverso)',
+      'El equipo ya está avisado y te responderá aquí mismo.',
+    ],
+    [
+      'despedida de escalado (legítima SOLO con tool ok)',
+      'Te paso con el equipo de Fruteria Javier; te responderán aquí mismo.',
+    ],
+  ])('escalado — dispara: %s', (_label, text) => {
+    expect(detectPhantomClaims(text)).toEqual(['escalation']);
   });
 
   it.each([
     [
-      'recapitulación legítima (presente 1.ª persona)',
+      'recapitulación de reserva (presente 1.ª persona)',
       'Te confirmo: Cesta de fruta, martes 9 de julio a las 10:00, ¿correcto?',
     ],
+    [
+      'recapitulación de cancelación (pregunta)',
+      '¿Cancelo tu Consulta del jueves 9 a las 13:00?',
+    ],
+    ['oferta de escalado (pregunta)', '¿Quieres que avise al equipo?'],
     ['sin afirmación', 'No tengo huecos el martes para tu cita.'],
     ['pregunta de intención', '¿Quieres que reserve la cita para el martes?'],
     ['sin contexto de cita', 'Nuestros precios están confirmados en la lista.'],
+    [
+      'cancelar en infinitivo (instrucción, no afirmación)',
+      'Para cancelar tu cita necesito que me digas cuál.',
+    ],
+    ['mención neutra del equipo', 'El equipo estará encantado de recibirte.'],
   ])('NO dispara: %s', (_label, text) => {
-    expect(looksLikeBookingConfirmation(text)).toBe(false);
+    expect(detectPhantomClaims(text)).toEqual([]);
   });
 
-  // Comportamiento documentado (añadido (a) del CHECK): futuro/condicional
-  // con participio SÍ dispara. Sin crear_cita ok en el turno degradaría al
-  // fallback honesto ("no he podido completar la reserva") — aceptable: nunca
-  // deja pasar una promesa de cita sin respaldo de tool.
+  it('confirmación de reprogramación: afirma reserva Y cancelación (exige AMBAS tools ok)', () => {
+    expect(
+      detectPhantomClaims(
+        'Tu cita queda cambiada: he cancelado la del jueves y la nueva del viernes está confirmada.',
+      ),
+    ).toEqual(['booking', 'cancellation']);
+  });
+
+  // Comportamiento documentado (añadido (a) del CHECK de T5): futuro o
+  // condicional con participio SÍ dispara. Sin la tool ok en el turno degrada
+  // al fallback honesto (que desde T6 escala de verdad) — aceptable: nunca
+  // deja pasar una promesa sin respaldo de tool.
   it('dispara con futuro/condicional + participio (degradación aceptada a fallback honesto)', () => {
     expect(
-      looksLikeBookingConfirmation(
+      detectPhantomClaims(
         'Tu cita quedará confirmada cuando el equipo la revise.',
       ),
-    ).toBe(true);
+    ).toEqual(['booking']);
   });
 });
 
@@ -417,8 +479,8 @@ describe('BotEngineService — guardia anti-fantasma (fix 3 post-T5)', () => {
     mockMessagesCreate.mockReset();
   });
 
-  it('escenario del bug: confirmación sin tool → corrección; si persiste → fallback y el texto fantasma JAMÁS se devuelve', async () => {
-    const { service } = makeService();
+  it('escenario del bug: confirmación sin tool → corrección; si persiste → fallback, el texto fantasma JAMÁS se devuelve y se escala de verdad (opción A)', async () => {
+    const { service, transitionToPendingReview } = makeService();
     mockMessagesCreate
       .mockResolvedValueOnce(textResponse(PHANTOM_TEXT))
       .mockResolvedValueOnce(
@@ -452,6 +514,15 @@ describe('BotEngineService — guardia anti-fantasma (fix 3 post-T5)', () => {
     );
     expect(reply?.body).not.toContain('queda confirmada');
     expect(reply?.metadata.phantomGuard).toBe('suppressed');
+
+    // Opción A (T6): el fallback promete equipo → escalado REAL + auditoría.
+    expect(transitionToPendingReview).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+    expect(reply?.metadata.escalation).toEqual({
+      motivo: 'NO_PUEDO_RESOLVER',
+    });
   });
 
   it('corrección eficaz: tras el aviso el modelo llama a crear_cita y la confirmación pasa (phantomGuard: corrected)', async () => {
@@ -516,7 +587,7 @@ describe('BotEngineService — guardia anti-fantasma (fix 3 post-T5)', () => {
   });
 
   it('texto sin pretensión de reserva → pasa sin fricción aunque no haya tools', async () => {
-    const { service } = makeService();
+    const { service, transitionToPendingReview } = makeService();
     mockMessagesCreate.mockResolvedValue(
       textResponse('La cesta de fruta cuesta 25.00 € y dura 30 min.'),
     );
@@ -529,6 +600,427 @@ describe('BotEngineService — guardia anti-fantasma (fix 3 post-T5)', () => {
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
     expect(reply?.body).toBe('La cesta de fruta cuesta 25.00 € y dura 30 min.');
     expect(reply?.metadata.phantomGuard).toBeUndefined();
+    expect(transitionToPendingReview).not.toHaveBeenCalled();
+  });
+});
+
+describe('BotEngineService — escalado real (T6)', () => {
+  beforeEach(() => {
+    mockMessagesCreate.mockReset();
+  });
+
+  it('escalar_a_humano ok: la despedida pasa la guardia y la metadata audita el motivo', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
+    // La transición la hace la PROPIA tool (server-side); el engine no debe
+    // repetirla.
+    toolsExecute.mockResolvedValue({
+      ok: true,
+      result: { escalado: true, motivo: 'PIDE_HUMANO' },
+    });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'escalar_a_humano', { motivo: 'PIDE_HUMANO' }),
+      )
+      .mockResolvedValueOnce(
+        textResponse(
+          'Te paso con el equipo de Fruteria Javier; te responderán aquí mismo.',
+        ),
+      );
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(toolsExecute).toHaveBeenCalledWith(
+      { businessId: BUSINESS_ID, conversationId: CONVERSATION_ID },
+      'escalar_a_humano',
+      { motivo: 'PIDE_HUMANO' },
+    );
+    expect(reply?.body).toBe(
+      'Te paso con el equipo de Fruteria Javier; te responderán aquí mismo.',
+    );
+    expect(reply?.metadata.phantomGuard).toBeUndefined();
+    expect(reply?.metadata.escalation).toEqual({ motivo: 'PIDE_HUMANO' });
+    expect(transitionToPendingReview).not.toHaveBeenCalled();
+  });
+
+  it('aviso fantasma (el bug v0): "aviso al equipo" sin tool → corrección; si persiste → fallback que SÍ escala', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        textResponse('Entiendo. Aviso al equipo para que te atiendan.'),
+      )
+      .mockResolvedValueOnce(
+        textResponse('Tranquilo, ya he avisado al equipo.'),
+      );
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    // La corrección exige la tool…
+    const [secondArgs] = mockMessagesCreate.mock.calls[1] as [
+      { messages: Array<{ role: string; content: unknown }> },
+    ];
+    const lastMessage = secondArgs.messages[secondArgs.messages.length - 1];
+    expect(lastMessage.content).toContain(
+      'No has llamado a escalar_a_humano en este turno',
+    );
+
+    // …el modelo persistió → el backend hace verdad la promesa (opción A).
+    expect(toolsExecute).not.toHaveBeenCalled();
+    expect(transitionToPendingReview).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+    expect(reply?.body).toBe(
+      'Aviso al equipo para que te atiendan en cuanto puedan; te responderán ' +
+        'aquí mismo.',
+    );
+    expect(reply?.metadata.phantomGuard).toBe('suppressed');
+    expect(reply?.metadata.escalation).toEqual({
+      motivo: 'NO_PUEDO_RESOLVER',
+    });
+  });
+});
+
+describe('BotEngineService — FIX 1: acción con efecto JAMÁS acaba en silencio', () => {
+  beforeEach(() => {
+    mockMessagesCreate.mockReset();
+  });
+
+  it('escalado silencioso (el bug del log 23:52): escalar_a_humano ok + texto vacío → despedida fija con el negocio, no null', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
+    toolsExecute.mockResolvedValue({
+      ok: true,
+      result: { escalado: true, motivo: 'PIDE_HUMANO' },
+    });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'escalar_a_humano', { motivo: 'PIDE_HUMANO' }),
+      )
+      .mockResolvedValueOnce(textResponse(''));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(reply?.body).toBe(
+      'Te paso con el equipo de Fruteria Javier; te responderán aquí mismo.',
+    );
+    expect(reply?.metadata.escalation).toEqual({ motivo: 'PIDE_HUMANO' });
+    // La transición ya la hizo la tool; el engine no la repite.
+    expect(transitionToPendingReview).not.toHaveBeenCalled();
+  });
+
+  it('crear_cita ok + texto vacío → confirmación mínima con los datos del tool_result', async () => {
+    const { service, toolsExecute } = makeService();
+    toolsExecute.mockResolvedValue({
+      ok: true,
+      result: {
+        creada: true,
+        cita: {
+          servicio: 'Cesta de fruta',
+          fecha: '2026-07-13',
+          hora: '10:00',
+          nombreCliente: 'Ana',
+        },
+      },
+    });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'crear_cita', {
+          serviceId: SERVICE_ID,
+          fechaHora: '2026-07-13T10:00',
+          nombreCliente: 'Ana',
+        }),
+      )
+      .mockResolvedValueOnce(textResponse(''));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(reply?.body).toBe(
+      '¡Hecho! Tu cita queda confirmada: Cesta de fruta el 2026-07-13 a las 10:00.',
+    );
+  });
+
+  it('cancelar_cita ok + texto vacío → confirmación mínima de la cancelación', async () => {
+    const { service, toolsExecute } = makeService();
+    toolsExecute.mockResolvedValue({
+      ok: true,
+      result: {
+        cancelada: true,
+        cita: {
+          servicio: 'Cesta de fruta',
+          fecha: '2026-07-13',
+          hora: '10:00',
+        },
+      },
+    });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'cancelar_cita', {
+          appointmentId: 'a0000000-0000-0000-0000-000000000099',
+        }),
+      )
+      .mockResolvedValueOnce(textResponse(''));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(reply?.body).toBe(
+      'Hecho: tu cita de Cesta de fruta el 2026-07-13 a las 10:00 queda cancelada.',
+    );
+  });
+
+  it('reprogramación completa (crear ok + cancelar ok) + texto vacío → confirmación fija del cambio', async () => {
+    const { service, toolsExecute } = makeService();
+    toolsExecute
+      .mockResolvedValueOnce({
+        ok: true,
+        result: {
+          creada: true,
+          cita: {
+            servicio: 'Cesta de fruta',
+            fecha: '2026-07-17',
+            hora: '10:00',
+          },
+        },
+      })
+      .mockResolvedValueOnce({ ok: true, result: { cancelada: true } });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'crear_cita', {
+          serviceId: SERVICE_ID,
+          fechaHora: '2026-07-17T10:00',
+          nombreCliente: 'Ana',
+        }),
+      )
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_2', 'cancelar_cita', { appointmentId: 'a-vieja' }),
+      )
+      .mockResolvedValueOnce(textResponse(''));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(reply?.body).toBe(
+      '¡Hecho! Tu cita queda cambiada a Cesta de fruta el 2026-07-17 a las 10:00; la anterior queda cancelada.',
+    );
+  });
+
+  it('fallo del SDK DESPUÉS de escalar_a_humano ok → despedida fija, no silencio', async () => {
+    const { service, toolsExecute } = makeService();
+    toolsExecute.mockResolvedValue({
+      ok: true,
+      result: { escalado: true, motivo: 'FRUSTRACION' },
+    });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'escalar_a_humano', { motivo: 'FRUSTRACION' }),
+      )
+      .mockRejectedValueOnce(new Error('overloaded'));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(reply?.body).toBe(
+      'Te paso con el equipo de Fruteria Javier; te responderán aquí mismo.',
+    );
+    expect(reply?.metadata.escalation).toEqual({ motivo: 'FRUSTRACION' });
+  });
+
+  it('sin tools con efecto (solo consulta) + texto vacío → null como siempre (T4)', async () => {
+    const { service } = makeService();
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'consultar_disponibilidad', {
+          serviceId: SERVICE_ID,
+          fecha: '2026-07-13',
+        }),
+      )
+      .mockResolvedValueOnce(textResponse(''));
+
+    await expect(
+      service.generateReply({
+        businessId: BUSINESS_ID,
+        conversationId: CONVERSATION_ID,
+      }),
+    ).resolves.toBeNull();
+  });
+});
+
+describe('BotEngineService — reprogramación con fallo parcial (T6)', () => {
+  const RESCHEDULE_CLAIM =
+    '¡Listo! Tu cita queda cambiada al viernes a las 10:00.';
+
+  beforeEach(() => {
+    mockMessagesCreate.mockReset();
+  });
+
+  it('crear_cita falla (hueco volado): la pretensión "queda cambiada" se intercepta y cancelar_cita nunca llega a ejecutarse', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
+    toolsExecute.mockResolvedValueOnce({
+      ok: false,
+      result: { error: 'Ese hueco acaba de ocuparse…' },
+    });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'crear_cita', {
+          serviceId: SERVICE_ID,
+          fechaHora: '2026-07-17T10:00',
+          nombreCliente: 'Ana',
+        }),
+      )
+      // El modelo miente pese al error de la tool, y persiste tras el aviso.
+      .mockResolvedValueOnce(textResponse(RESCHEDULE_CLAIM))
+      .mockResolvedValueOnce(textResponse(RESCHEDULE_CLAIM));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    // La cita original queda intacta: cancelar_cita jamás se ejecutó.
+    expect(toolsExecute).toHaveBeenCalledTimes(1);
+    const [firstCall] = toolsExecute.mock.calls as [[unknown, string]];
+    expect(firstCall[1]).toBe('crear_cita');
+    // El texto fantasma nunca sale; fallback honesto + escalado real.
+    expect(reply?.body).toBe(
+      'No he podido completar la gestión de tu cita ahora mismo, aviso al ' +
+        'equipo para que lo revisen. ¡Disculpa las molestias!',
+    );
+    expect(reply?.metadata.phantomGuard).toBe('suppressed');
+    expect(transitionToPendingReview).toHaveBeenCalled();
+  });
+
+  it('crear_cita ok pero cancelar_cita falla: "queda cambiada" sigue sin respaldo (exige cancelar_cita ok) → interceptado', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
+    toolsExecute
+      .mockResolvedValueOnce({ ok: true, result: { creada: true } })
+      .mockResolvedValueOnce({
+        ok: false,
+        result: { error: 'Esa cita acaba de cambiar…' },
+      });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'crear_cita', {
+          serviceId: SERVICE_ID,
+          fechaHora: '2026-07-17T10:00',
+          nombreCliente: 'Ana',
+        }),
+      )
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_2', 'cancelar_cita', {
+          appointmentId: 'a-vieja',
+        }),
+      )
+      .mockResolvedValueOnce(textResponse(RESCHEDULE_CLAIM))
+      .mockResolvedValueOnce(textResponse(RESCHEDULE_CLAIM));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(toolsExecute).toHaveBeenCalledTimes(2);
+    // FIX 4: el fallback NO es el genérico — cuenta el duplicado honesto.
+    expect(reply?.body).toBe(
+      'He creado tu cita nueva pero no he podido anular la anterior — te ' +
+        'han quedado las dos; aviso al equipo para que lo corrijan.',
+    );
+    expect(reply?.metadata.phantomGuard).toBe('suppressed');
+    expect(reply?.metadata.toolCalls).toEqual([
+      { name: 'crear_cita', ok: true },
+      { name: 'cancelar_cita', ok: false },
+    ]);
+    expect(reply?.metadata.escalation).toEqual({
+      motivo: 'NO_PUEDO_RESOLVER',
+    });
+    expect(transitionToPendingReview).toHaveBeenCalled();
+  });
+
+  it('FIX 1+4 integrado: crear ok + cancelar fallido + Claude CALLA (texto vacío) → texto honesto del duplicado + escalado + metadata', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
+    toolsExecute
+      .mockResolvedValueOnce({ ok: true, result: { creada: true } })
+      .mockResolvedValueOnce({
+        ok: false,
+        result: { error: 'Esa cita acaba de cambiar…' },
+      });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'crear_cita', {
+          serviceId: SERVICE_ID,
+          fechaHora: '2026-07-17T10:00',
+          nombreCliente: 'Ana',
+        }),
+      )
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_2', 'cancelar_cita', {
+          appointmentId: 'a-vieja',
+        }),
+      )
+      .mockResolvedValueOnce(textResponse(''));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(reply?.body).toBe(
+      'He creado tu cita nueva pero no he podido anular la anterior — te ' +
+        'han quedado las dos; aviso al equipo para que lo corrijan.',
+    );
+    expect(reply?.metadata.escalation).toEqual({
+      motivo: 'NO_PUEDO_RESOLVER',
+    });
+    expect(transitionToPendingReview).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+  });
+
+  it('reprogramación feliz (crear ok + cancelar ok): la confirmación del cambio pasa sin fricción', async () => {
+    const { service, toolsExecute, transitionToPendingReview } = makeService();
+    toolsExecute
+      .mockResolvedValueOnce({ ok: true, result: { creada: true } })
+      .mockResolvedValueOnce({ ok: true, result: { cancelada: true } });
+    mockMessagesCreate
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_1', 'crear_cita', {
+          serviceId: SERVICE_ID,
+          fechaHora: '2026-07-17T10:00',
+          nombreCliente: 'Ana',
+        }),
+      )
+      .mockResolvedValueOnce(
+        toolUseResponse('tu_2', 'cancelar_cita', {
+          appointmentId: 'a-vieja',
+        }),
+      )
+      .mockResolvedValueOnce(textResponse(RESCHEDULE_CLAIM));
+
+    const reply = await service.generateReply({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+    });
+
+    expect(reply?.body).toBe(RESCHEDULE_CLAIM);
+    expect(reply?.metadata.phantomGuard).toBeUndefined();
+    expect(transitionToPendingReview).not.toHaveBeenCalled();
   });
 });
 
