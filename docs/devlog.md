@@ -139,6 +139,30 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-07 — H2 Tarea 5: Acciones de agenda del bot (disponibilidad real + creación con confirmación)
+
+**Qué se hizo.** El bot pasa de hablar a actuar: dos tools server-side (`consultar_disponibilidad`, `crear_cita`) vía tool use nativo de Anthropic, implementando el flujo de reserva del 09 con confirmación explícita obligatoria. Un cliente reserva conversando por WhatsApp y la cita aparece en la Agenda web del negocio — **el círculo completo del producto, verificado en vivo** (5 citas reales creadas por el bot, contrastadas en psql y Agenda).
+
+**Decisiones clave (PLAN).**
+- `weeklySchedule Json?` en Business (migración aditiva): intervalos por día → soporta jornada partida española; null = sin horario (la tool lo dice, jamás inventa). Seed por psql documentado (§9).
+- Hallazgo de auditoría: H1 YA protege solapes en transacción (ConflictException en AppointmentsService.create) → reutilizándolo, la protección de carrera vino gratis y cero lógica duplicada. Refactor mínimo H1 (4 cambios): createdById nullable, param source (bot → WHATSAPP; la agenda distingue origen), exports de módulos, ACTIVE_STATUSES compartido. De rebote: primera suite de tests de regresión de appointments (no existía).
+- SDK @anthropic-ai/sdk adoptado (bucle multi-turno tipado + retries — cierra parte de la deuda T4); bucle manual con tope 5 iteraciones + fallback honesto. Adapter de Meta sigue con fetch.
+- Slots en rejilla fija de 30 min (horas naturales), máx. 8 + masHuecos, formato exacto para que el modelo copie. Lógica pura en availability.util (testeable sin BD). Metadata por OUT: tokens acumulados + toolCalls.
+
+**Los 4 fixes de la verificación en vivo** (100→102 tests; ninguno lo habría cazado un test a priori):
+1. **El bot no sabía qué día es** — preguntó la fecha al cliente y compuso año pasado → el filtro de slots pasados vació la disponibilidad ("no hay huecos" falso). Fix: fecha actual (día de semana + año, zona negocio) inyectada en el prompt + la tool rechaza fechas pasadas con error explícito + log DEBUG de tools (nombre + input).
+2. **Reciclaje de disponibilidad caducada** — afirmó "no hay huecos el 8" sin llamar a la tool, reutilizando un resultado obsoleto del historial. Fix: regla de caducidad en el prompt ("nunca afirmes disponibilidad sin tool_result de este turno") + diaSemana devuelto por la tool (también llamó "miércoles" al jueves 9).
+3. **CONFIRMACIONES FANTASMA (crítico)** — 2 de 4 reservas "¡Listo! confirmada" no existían en BD: el modelo imitaba el patrón de confirmación del historial saltándose crear_cita, violando la prohibición explícita del prompt. Fix: **guardia determinista en el engine** — detector puro por participios perfectivos ("queda confirmada/he reservado" dispara; la recap "Te confirmo: …, ¿correcto?" no) + señal 100% cierta de toolCalls; 1 corrección inyectada máx., luego fallback honesto; texto fantasma jamás se envía; `phantomGuard: corrected|suppressed` en metadata. **Validación inmediata: en las 2 reservas siguientes la guardia saltó ('corrected') — el modelo reincidió 2 veces más y la defensa salvó ambas.** Lección de diseño: la conducta crítica no puede depender solo del prompt.
+4. **Nombre de terceros perdido** — todas las citas cuelgan del Client resuelto por teléfono (diseño correcto), pero los nombres dados (Fátima, Ester, Iván) se perdían — y la tool confirmaba "a nombre de javier" citas de otros. Fix: si el nombre dado difiere (laxo) → notes "Reserva a nombre de: X (vía WhatsApp)" + la confirmación usa el nombre dado. Verificado (cita de Lucía con nota).
+
+**Verificación final.** 5/5 citas del bot en BD (source WHATSAPP, createdById null); Agenda web mostrándolas (captura); hueco ocupado → rechaza las 12:00 y ofrece las 12:30 (aritmética de intervalos exacta); domingo → no inventa; reservas encadenadas multi-persona en una conversación contaminada, todas respaldadas.
+
+**Commit.** `feat(api): acciones de agenda del bot (disponibilidad real + creación con confirmación)`
+
+**Deuda nueva.** Reservas para terceros de verdad (múltiples personas por teléfono; hoy: 1 Client + nota como paliativo) — decisión de producto. Refinamiento de prompt acumulado para BotConfig: parafraseo impreciso del "cerrado" (dice "no tengo información"), aritmética de calendario floja (lío viernes/sábado autocorregido por la tool), repetición de coletillas. Observabilidad: log del webhook no registra mensajes de texto procesados (solo statuses) — añadir DEBUG simétrico. Bajar "Ignoring status" a VERBOSE (ruido).
+
+**Moraleja (para el proyecto).** 100 tests en verde y el fallo más grave del producto solo apareció conversando de verdad. La verificación en vivo conversacional es parte del CHECK desde ahora, con regla: ninguna confirmación del bot se da por buena sin su fila en psql.
+
 ### 2026-07-07 — H2 Tarea 5: acciones de agenda del bot (el círculo completo del producto)
 
 **Qué se hizo.** El bot pasa de hablar a actuar: `consultar_disponibilidad` (horario semanal −
