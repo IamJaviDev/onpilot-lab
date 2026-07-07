@@ -35,6 +35,8 @@ export interface OutgoingBotMessage {
   body: string;
   // wamid devuelto por Meta al enviar.
   waMessageId: string;
+  // Metadata opcional del bot (tokens/modelo) para Message.metadata (Json).
+  metadata?: Prisma.InputJsonValue;
 }
 
 @Injectable()
@@ -147,6 +149,8 @@ export class ConversationService {
           author: MessageAuthor.BOT,
           body: msg.body,
           waMessageId: msg.waMessageId,
+          // undefined = columna no seteada (queda NULL), sin rama condicional.
+          metadata: msg.metadata,
         },
       }),
       // updateMany con id + businessId: regla multi-tenant del proyecto.

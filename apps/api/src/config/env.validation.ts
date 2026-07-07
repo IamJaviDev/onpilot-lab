@@ -18,8 +18,10 @@ const REQUIRED_ENV_VARS = [
   'WHATSAPP_PHONE_NUMBER_ID',
   'WHATSAPP_BUSINESS_ID',
   // Token permanente (System User) para el envío por Graph API (Tarea 3).
-  // MESSAGING_ECHO_ENABLED NO va aquí: es opcional y su ausencia significa off.
   'WHATSAPP_ACCESS_TOKEN',
+  // API key de Anthropic para el BotEngine (Tarea 4). Mismo criterio fail-fast.
+  // BOT_ENGINE_ENABLED NO va aquí: es opcional y su ausencia significa off.
+  'ANTHROPIC_API_KEY',
 ] as const;
 
 export function validateEnv(

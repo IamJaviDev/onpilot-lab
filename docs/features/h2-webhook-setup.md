@@ -1,8 +1,8 @@
 # H2 — Webhook de WhatsApp: configuración y verificación
 
-Guía operativa para las **Tareas 2/9 (recepción) y 3/9 (envío + eco)**. Cubre el
-túnel de desarrollo, la configuración en el panel de Meta, el token permanente
-de System User (§7) y las recetas de verificación (curl y en vivo).
+Guía operativa para las **Tareas 2/9 (recepción), 3/9 (envío) y 4/9 (BotEngine)**.
+Cubre el túnel de desarrollo, la configuración en el panel de Meta, el token
+permanente de System User (§7) y las recetas de verificación (curl y en vivo).
 
 > Claude Code **no** instala ni ejecuta el túnel ni levanta servidores: esos
 > pasos los hace Javier. Aquí quedan documentados.
@@ -19,7 +19,8 @@ WHATSAPP_APP_SECRET=<App Secret de la app de Meta>
 WHATSAPP_PHONE_NUMBER_ID=<phone_number_id del número de prueba>
 WHATSAPP_BUSINESS_ID=<UUID del Business sandbox en tu BD>
 WHATSAPP_ACCESS_TOKEN=<token permanente de System User — ver §7>
-MESSAGING_ECHO_ENABLED=false   # opcional; solo 'true' exacto activa el eco (§8)
+ANTHROPIC_API_KEY=<API key de Anthropic — console.anthropic.com>
+BOT_ENGINE_ENABLED=false       # opcional; solo 'true' exacto activa el bot (§8)
 ```
 
 - **verify token**: lo inventas tú (cualquier string difícil). Se repite tal cual
@@ -31,12 +32,15 @@ MESSAGING_ECHO_ENABLED=false   # opcional; solo 'true' exacto activa el eco (§8
   `Business`. Sáscalo con: `psql "$DATABASE_URL" -c 'select id, name from "Business";'`
 - **WHATSAPP_ACCESS_TOKEN**: token permanente de System User para enviar
   mensajes por la Graph API. Cómo generarlo: §7. **Nunca al repo.**
-- **MESSAGING_ECHO_ENABLED**: flag del eco temporal de la Tarea 3. Opcional;
-  solo el string **exacto** `true` lo activa (cualquier otro valor u omisión =
-  apagado). Se retira cuando llegue el BotEngine (Tarea 4).
+- **ANTHROPIC_API_KEY**: API key de Anthropic para el BotEngine (Tarea 4).
+  Se genera en console.anthropic.com → API Keys. Mismas reglas que el access
+  token: **nunca al repo**, nunca a logs.
+- **BOT_ENGINE_ENABLED**: flag del BotEngine v0. Opcional; solo el string
+  **exacto** `true` lo activa (cualquier otro valor u omisión = apagado).
 
-La API **no arranca** si falta cualquiera de las cinco primeras (fail-fast en
-`env.validation.ts`); el flag del eco es opcional.
+La API **no arranca** si falta cualquiera de las obligatorias — las cinco de
+WhatsApp y `ANTHROPIC_API_KEY` (fail-fast en `env.validation.ts`); el flag del
+bot es opcional.
 
 ---
 
@@ -300,31 +304,46 @@ Si responde el JSON de suscripciones (y no un error OAuth), el token funciona.
 
 ---
 
-## 8. Verificación en vivo del eco (Tarea 3)
+## 8. Verificación en vivo del bot (Tarea 4)
 
-Con el token de §7 ya en `.env`:
+Con el token de §7 y `ANTHROPIC_API_KEY` ya en `.env`:
 
-1. `MESSAGING_ECHO_ENABLED=true` en `apps/api/.env` (exactamente `true`).
+> **Conversación limpia**: si la conversación abierta arrastra ecos de la
+> Tarea 3, ciérrala por psql (`CLOSED`) y empieza una nueva — el invariante
+> "una conversación abierta por teléfono" lo permite:
+>
+> ```bash
+> psql "$DATABASE_URL" -c 'update "Conversation" set status = '"'"'CLOSED'"'"' where id = '"'"'<CONVERSATION_ID>'"'"';'
+> ```
+
+1. `BOT_ENGINE_ENABLED=true` en `apps/api/.env` (exactamente `true`).
 2. Arranca API + túnel; si la URL de ngrok cambió, actualiza la callback URL en
    el panel (§3).
-3. Escribe un WhatsApp desde tu móvil al número de prueba → debe llegarte **el
-   eco de vuelta al móvil**: `🤖 Eco de prueba de Onpilot: recibido "…"`.
-4. `psql`: el par IN/OUT persistido; el OUT con `direction=OUT`, `author=BOT` y
-   un `waMessageId` real de Meta (distinto del IN):
+3. Conversación real desde el móvil al número de prueba:
+   - **Saludo** → debe identificarse como asistente automático del negocio
+     (Art. 50: identificación proactiva en el primer mensaje).
+   - **Servicios/precios** → debe responder SOLO los de la BD, sin inventar.
+   - **Fuera de scope** (fútbol, noticias…) → redirección a temas del negocio.
+   - **Pedir cita** → "tomo nota, el equipo confirma", sin inventar huecos ni
+     confirmar nada.
+   - **Algo que no sabe** → "no tengo esa información, aviso al equipo".
+4. `psql`: el OUT del bot con `author=BOT`, un `waMessageId` real de Meta y
+   `metadata` con los tokens (medición de coste desde el día 1):
 
    ```bash
-   psql "$DATABASE_URL" -c 'select direction, author, body, "waMessageId" from "Message" order by "createdAt" desc limit 4;'
+   psql "$DATABASE_URL" -c 'select direction, author, left(body, 60), metadata from "Message" order by "createdAt" desc limit 4;'
    ```
 
-5. **Prueba de estados** (el sistema calla fuera de BOT_ACTIVE):
+5. **Prueba de estados** (el sistema calla fuera de BOT_ACTIVE; actualizar por
+   id, como aprendimos):
 
    ```bash
    # pasar la conversación a control humano
    psql "$DATABASE_URL" -c 'update "Conversation" set status = '"'"'HUMAN_CONTROL'"'"' where id = '"'"'<CONVERSATION_ID>'"'"';'
    ```
 
-   Mensaje desde el móvil → **NO** hay eco (el IN sí se persiste). Devuélvela a
+   Mensaje desde el móvil → **silencio** (el IN sí se persiste). Devuélvela a
    `BOT_ACTIVE` al terminar.
 
-6. Al acabar la sesión de pruebas, `MESSAGING_ECHO_ENABLED=false` (o quitar la
+6. Al acabar la sesión de pruebas, `BOT_ENGINE_ENABLED=false` (o quitar la
    línea): el default es apagado.
