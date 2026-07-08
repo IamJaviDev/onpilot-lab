@@ -170,8 +170,11 @@ describe('BotEngineService', () => {
     ]);
     expect(args.system).toContain('Fruteria Javier');
     expect(args.system).toContain(`id: ${SERVICE_ID}`);
-    // Fecha actual inyectada (fix post-T5): día de semana + año, en español.
-    expect(args.system).toMatch(/Hoy es \p{L}+, \d{1,2} de \p{L}+ de \d{4}/u);
+    // Fecha Y HORA actual inyectada (fix reloj + post-T5): día de semana,
+    // año y hora HH:mm, en español.
+    expect(args.system).toMatch(
+      /Ahora es \p{L}+, \d{1,2} de \p{L}+ de \d{4} a las \d{2}:\d{2}/u,
+    );
     expect(args.messages).toEqual([
       { role: 'user', content: 'Hola, quiero una cita' },
     ]);

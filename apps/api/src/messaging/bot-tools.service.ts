@@ -418,6 +418,18 @@ export class BotToolsService {
     });
     if (!startsAt.isValid) return this.businessError('Fecha y hora inválidas.');
 
+    // Defensa en profundidad (fix del reloj): el modelo puede construir una
+    // hora ya pasada del día de hoy (alucinando la hora desde el historial).
+    // assertNotPast de H1 es el backstop, pero aquí el error es localizado y
+    // accionable —le damos la hora actual para que se autocorrija— y corta
+    // antes de crear cliente o entrar en la transacción.
+    const now = DateTime.now().setZone(business.timezone);
+    if (startsAt <= now) {
+      return this.businessError(
+        `Esa hora ya pasó: ahora son las ${now.toFormat('HH:mm')}. Ofrece un hueco futuro.`,
+      );
+    }
+
     const client = await this.resolveClient(context, nombreCliente);
     if ('error' in client) return this.businessError(client.error);
 

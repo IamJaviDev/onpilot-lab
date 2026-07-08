@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { DateTime } from 'luxon';
 import type { AppointmentsService } from '../appointments/appointments.service';
 import type { ClientsService } from '../clients/clients.service';
 import {
@@ -453,6 +454,43 @@ describe('BotToolsService — crear_cita', () => {
     expect(outcome.ok).toBe(false);
     expect(m.appointmentsCreate).not.toHaveBeenCalled();
     expect(m.clientsCreate).not.toHaveBeenCalled();
+  });
+
+  it('fix reloj: fechaHora en el pasado (hora ya transcurrida) → error "ya pasó" sin crear, guard antes de resolver/crear', async () => {
+    const m = makeService();
+    const pasado = DateTime.now()
+      .setZone('Europe/Madrid')
+      .minus({ hours: 1 })
+      .toFormat("yyyy-MM-dd'T'HH:mm");
+
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: pasado,
+    });
+
+    expect(outcome.ok).toBe(false);
+    const error = outcome.result.error as string;
+    expect(error).toContain('ya pasó');
+    expect(error).toContain('ahora son las');
+    // El guard corta antes de resolver/crear cliente y antes de la transacción.
+    expect(m.appointmentsCreate).not.toHaveBeenCalled();
+    expect(m.clientsCreate).not.toHaveBeenCalled();
+  });
+
+  it('fix reloj: fechaHora futura del mismo día ("hoy más tarde") pasa el guard y crea', async () => {
+    const m = makeService();
+    const masTarde = DateTime.now()
+      .setZone('Europe/Madrid')
+      .plus({ hours: 1 })
+      .toFormat("yyyy-MM-dd'T'HH:mm");
+
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: masTarde,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(m.appointmentsCreate).toHaveBeenCalledTimes(1);
   });
 
   it('FIX 3: serviceId con forma no-UUID → error legible ANTES de cualquier query', async () => {

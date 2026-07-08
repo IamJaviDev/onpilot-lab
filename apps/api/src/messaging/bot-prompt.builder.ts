@@ -24,12 +24,13 @@ export interface BotPromptInput {
   businessName: string;
   // Timezone IANA del negocio (Business.timezone) para referencias temporales.
   timezone: string;
-  // Fecha actual YA formateada en la zona del negocio, con día de semana y
-  // año ("martes, 7 de julio de 2026"). La calcula el BotEngine (luxon); se
-  // pasa como parámetro para mantener el builder puro. Sin ella el modelo no
-  // tiene reloj: pregunta la fecha al cliente o construye años pasados
-  // (hallazgo de la verificación en vivo de T5).
-  today: string;
+  // Fecha Y HORA actual YA formateada en la zona del negocio, con día de
+  // semana, año y hora ("martes, 7 de julio de 2026 a las 23:34"). La calcula
+  // el BotEngine (luxon); se pasa como parámetro para mantener el builder puro.
+  // Sin la fecha el modelo construye años pasados (T5); sin la hora alucina la
+  // hora del día desde el historial y razona mal sobre "ya pasó" / "en N min"
+  // (fix del reloj).
+  now: string;
   // Services activos del negocio. Vacío = el prompt lo declara explícitamente
   // y prohíbe inventar (el bot sigue siendo útil para tomar nota).
   services: BotPromptServiceItem[];
@@ -40,7 +41,7 @@ export interface BotPromptInput {
 }
 
 export function buildBotSystemPrompt(input: BotPromptInput): string {
-  const { businessName, timezone, today, services, isFirstBotReply } = input;
+  const { businessName, timezone, now, services, isFirstBotReply } = input;
 
   const servicesSection =
     services.length > 0
@@ -71,7 +72,7 @@ Esta es tu primera respuesta en la conversación: ábrela identificándote como 
 - Respuestas cortas y claras, estilo WhatsApp (2-4 frases). Nada de párrafos densos.
 ${firstReplySection}
 ## Datos reales del negocio
-- Hoy es ${today}. Calcula cualquier fecha relativa ("mañana", "el viernes") a partir de aquí, SIEMPRE con este año. Nunca preguntes al cliente qué día es hoy.
+- Ahora es ${now}. Calcula cualquier fecha relativa ("mañana", "el viernes") a partir de aquí, SIEMPRE con este año. Usa SIEMPRE esta hora del sistema para juzgar si un momento ya pasó o cuánto falta; NUNCA deduzcas la hora del historial de mensajes. Nunca preguntes al cliente qué día es hoy.
 - Zona horaria del negocio: ${timezone} (úsala para cualquier referencia temporal).
 - ${servicesSection}
 

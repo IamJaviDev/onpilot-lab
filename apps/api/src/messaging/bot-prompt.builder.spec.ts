@@ -18,7 +18,7 @@ function makeInput(overrides: Partial<BotPromptInput> = {}): BotPromptInput {
   return {
     businessName: 'Fruteria Javier',
     timezone: 'Europe/Madrid',
-    today: 'martes, 7 de julio de 2026',
+    now: 'martes, 7 de julio de 2026 a las 23:34',
     services: [
       {
         id: SERVICE_ID_1,
@@ -64,11 +64,17 @@ describe('buildBotSystemPrompt', () => {
     expect(prompt).toContain('Europe/Madrid');
   });
 
-  it('incluye la fecha actual con año y prohíbe preguntar qué día es (fix post-T5)', () => {
+  it('incluye la fecha Y HORA actual, con año, e instruye a no deducir la hora del historial (fix reloj + post-T5)', () => {
     const prompt = buildBotSystemPrompt(makeInput());
 
-    expect(prompt).toContain('Hoy es martes, 7 de julio de 2026');
+    expect(prompt).toContain('Ahora es martes, 7 de julio de 2026 a las 23:34');
     expect(prompt).toContain('SIEMPRE con este año');
+    expect(prompt).toContain(
+      'Usa SIEMPRE esta hora del sistema para juzgar si un momento ya pasó o cuánto falta',
+    );
+    expect(prompt).toContain(
+      'NUNCA deduzcas la hora del historial de mensajes',
+    );
     expect(prompt).toContain('Nunca preguntes al cliente qué día es hoy');
   });
 

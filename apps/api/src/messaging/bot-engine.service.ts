@@ -280,17 +280,19 @@ export class BotEngineService {
       return null;
     }
 
-    // Fecha actual en zona negocio, con día de semana y año: el modelo no
-    // tiene reloj y sin esto construye fechas con año pasado (fix post-T5).
-    const today = DateTime.now()
+    // Fecha Y HORA actual en zona negocio: el modelo no tiene reloj. Sin la
+    // fecha construía años pasados (fix post-T5); sin la hora alucinaba la
+    // hora del día desde el historial ("son casi las 19:30" a las 23:34) y
+    // razonaba mal sobre "ya pasó" / "en 10 min" (fix del reloj).
+    const now = DateTime.now()
       .setZone(business.timezone)
       .setLocale('es')
-      .toFormat("cccc, d 'de' LLLL 'de' yyyy");
+      .toFormat("cccc, d 'de' LLLL 'de' yyyy 'a las' HH:mm");
 
     const systemPrompt = buildBotSystemPrompt({
       businessName: business.name,
       timezone: business.timezone,
-      today,
+      now,
       services: services.map((s) => ({
         id: s.id,
         name: s.name,
