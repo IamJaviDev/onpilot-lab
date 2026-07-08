@@ -60,6 +60,14 @@ lo cerró.
   historial de test. _(Generado en H2 T3, 06/07/26.)_
 
 ### IA / Bot (H2)
+- [ ] **Plantilla HSM para recordatorios fuera de ventana (DESTACADA).** El recordatorio 24h
+  es texto libre; si el cliente lleva >24h sin escribir, Meta lo rechaza con 131047 (ventana
+  cerrada) — el caso típico de un recordatorio. El processor lo marca completado-con-fallo (no
+  reintenta: la ventana no se abre sola), pero el cliente NO recibe nada. Solución real: plantilla
+  HSM aprobada de re-engagement. Bloquea el valor del recordatorio en producción, no el desarrollo.
+  _(Generado en H2 T7, 08/07/26.)_
+- [ ] **Antelación del recordatorio fija en 24h.** Constante `REMINDER_LEAD_HOURS` con comentario
+  "futuro BotConfig"; configurable por negocio cuando exista BotConfig. _(Generado en H2 T7, 08/07/26.)_
 - [ ] **Fallo TOTAL de Claude = silencio (solo sin efecto).** Mitigada en T6: tras una tool CON
   EFECTO ok (crear/cancelar/escalar), el silencio (vacío/refusal/fallo SDK) produce texto fijo
   desde los tool_results. Queda el caso sin efecto (fallo antes de actuar): el cliente no
@@ -149,6 +157,27 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 
 ## Asientos
+
+### 2026-07-08 — H2 Tarea 7: Recordatorios de cita 24h antes (BullMQ + Redis)
+
+**Qué se hizo.** Cierre de la Oleada 1: la dimensión temporal. El bot recuerda la cita al cliente 24h antes por la misma conversación de WhatsApp, y el Redis del docker-compose entra en servicio por primera vez. Cola BullMQ `appointment-reminders`, un job por cita con **jobId determinista = appointmentId** (la clave para cancelarlo/reprogramarlo desde cualquier origen), programado con `delay` hasta (startsAt − 24h). La respuesta del cliente al recordatorio la gestionan T5/T6 gratis por el flujo normal del webhook: aquí solo sale el OUT programado.
+
+**Decisiones clave (PLAN).**
+- **Módulo híbrido para grafo acíclico.** `reminders/` tiene la cola + el scheduler (sin dependencias de otros módulos de feature); el **processor vive en `messaging/`** porque componer y enviar un WhatsApp ES mensajería (necesita adapter + ConversationService). Si el processor viviera en reminders habría ciclo `Messaging → Appointments → Reminders → Messaging`. Grafo final: Reminders → nada; Appointments → Reminders; Messaging → Appointments + Reminders.
+- **Best-effort innegociable: Redis caído ≠ citas rotas.** `RemindersService.schedule/cancel/reschedule` JAMÁS lanzan (try/catch interno + log ERROR, patrón de `transitionToPendingReview` de T6). Conexión con `enableOfflineQueue:false` (el producer falla al instante en vez de colgar el `await` que bloquearía la cita) + `maxRetriesPerRequest:null` (requisito del Worker) + `retryStrategy` con backoff hasta 30s (sin él, un Redis caído inunda el log: medido ~20 líneas/s → una cada 30s).
+- **Ganchos en los services de H1** (create/cancel/update), no en el bot: un solo punto cubre TODOS los orígenes (web, bot T5, reprogramación T6 = cancel+create). `update` solo reprograma si la fecha cambia de verdad (comparación `getTime()`; un PATCH de solo-notas o con la misma hora no toca la cola).
+- **El processor releé la cita** (el job puede tener 6 días): descarta jobs huérfanos (inexistente / no activa / startsAt cambiado respecto al del payload / ya pasada), respeta conversaciones intervenidas (HUMAN_CONTROL/PENDING_REVIEW → no envía, el equipo está al mando), y para el **cliente de la web que nunca escribió crea la conversación** (BOT_ACTIVE, mismo patrón que persistIncoming: buscar no-CLOSED antes de crear). 131047 (ventana cerrada) = completado-con-fallo con WARN (reintentar no la abre); otros errores → política de reintentos de BullMQ (3, backoff).
+- **Flags estrictos** `REMINDERS_ENABLED` (`=== 'true'`, default off; el processor lo comprueba también, por si quedan jobs de antes) y `REMINDERS_LEAD_MINUTES` (override de la antelación SOLO para prueba manual, con WARN). `REDIS_URL` a env requeridas (fail-fast); el servidor caído no bloquea el arranque.
+
+**CHECK.** lint + typecheck + build en verde; 183 tests (150→183, +33). Cubiertos: los 4 descartes del processor + 131047 + camino feliz (con/sin conversación previa) + "a nombre de"; scheduler (jobId/delay, no-programar-si-lead-pasó, flag estricto, Redis caído no lanza, override de lead) + **flujo T6 a nivel de jobs con cola fake CON ESTADO** (tras cancel+create queda exactamente 1 job, el de la cita nueva) + update con startsAt igual NO reprograma. Humo con Redis real: arranque limpio; job huérfano encolado a mano → el processor lo consumió y descartó con su log; rastro limpiado de Redis. Sin Redis: la app arranca igual.
+
+**Nota de implementación.** El texto del recordatorio dice "de mañana" solo si la cita ES mañana en el timezone del negocio; si el job dispara tarde (Redis caído horas) o con lead de prueba, dice "de hoy"/"del jueves" — la referencia temporal no miente, la fecha y hora explícitas van siempre. `THIRD_PARTY_NOTE_RE` exportada de bot-tools (el "a nombre de" del recordatorio reutiliza el mismo parser, sin duplicar). `msgpackr-extract` (transitiva de BullMQ, acelerador nativo opcional) a `allowBuilds:false` en pnpm-workspace — BullMQ va en JS puro sin él.
+
+**Commit.** `feat(api): recordatorios de cita 24h antes (BullMQ + Redis)`
+
+**Deuda nueva.** Plantilla HSM aprobada para el 131047 (DESTACADA pre-lanzamiento): en v1 el recordatorio es texto libre y muere si la ventana de 24h está cerrada — justo el caso típico de un recordatorio a alguien que no ha escrito hoy. Antelación fija en 24h (constante con comentario "futuro BotConfig"). El recordatorio a clientes de la web depende de la normalización H1↔E.164 (deuda ya abierta): si el teléfono se guardó en local, no casa con la conversación y el envío falla contra Meta.
+
+**Verificación en vivo (pendiente, la hace Javier).** `REMINDERS_ENABLED=true` + `REMINDERS_LEAD_MINUTES=5` → cita a +10 min → recordatorio al móvil a los ~5; responder "cancélala" (T6); ver aparecer/desaparecer el job en `redis-cli keys` al crear/cancelar; parar Redis y crear cita (se crea igual, ERROR en log).
 
 ### 2026-07-08 — H2 Tarea 6: Escalado real + cancelar/reprogramar
 
