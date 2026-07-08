@@ -10,6 +10,7 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { RemindersService } from '../reminders/reminders.service';
 import { CancelAppointmentDto } from './dto/cancel-appointment.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { ListAppointmentsQueryDto } from './dto/list-appointments-query.dto';
@@ -42,7 +43,14 @@ type AppointmentWithRelations = Prisma.AppointmentGetPayload<{
 
 @Injectable()
 export class AppointmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  // Ganchos de recordatorio (H2 T7) en create/cancel/update: al estar aquí
+  // cubren TODOS los orígenes (web, bot T5, reprogramación T6 = cancel+create)
+  // con un único punto. RemindersService jamás lanza (best-effort): un Redis
+  // caído no rompe la operación de la cita.
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly reminders: RemindersService,
+  ) {}
 
   async list(businessId: string, query: ListAppointmentsQueryDto) {
     const where: Prisma.AppointmentWhereInput = { businessId, deletedAt: null };
@@ -100,6 +108,12 @@ export class AppointmentsService {
         include: APPOINTMENT_INCLUDE,
       });
     });
+    // Fuera de la transacción: la cita ya está creada pase lo que pase aquí.
+    await this.reminders.schedule({
+      id: appointment.id,
+      businessId,
+      startsAt: appointment.startsAt,
+    });
     return this.toDto(appointment);
   }
 
@@ -125,6 +139,13 @@ export class AppointmentsService {
     if (dto.startsAt !== undefined) {
       this.assertNotPast(startsAt);
     }
+
+    // Reprogramar el recordatorio solo si la fecha CAMBIA de verdad: un PATCH
+    // que repite el startsAt actual (o solo toca servicio/notas) no toca la
+    // cola — el job vigente sigue siendo correcto.
+    const startsAtChanged =
+      dto.startsAt !== undefined &&
+      startsAt.getTime() !== current.startsAt.getTime();
 
     const data: Prisma.AppointmentUncheckedUpdateManyInput = {};
     if (dto.notes !== undefined) data.notes = dto.notes;
@@ -170,6 +191,10 @@ export class AppointmentsService {
       }
     });
 
+    if (startsAtChanged) {
+      await this.reminders.reschedule({ id, businessId, startsAt });
+    }
+
     return this.getOne(businessId, id);
   }
 
@@ -191,6 +216,7 @@ export class AppointmentsService {
     if (result.count === 0) {
       throw new NotFoundException('Appointment not found');
     }
+    await this.reminders.cancel(id);
     return this.getOne(businessId, id);
   }
 

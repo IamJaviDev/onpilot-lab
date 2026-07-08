@@ -22,6 +22,11 @@ const REQUIRED_ENV_VARS = [
   // API key de Anthropic para el BotEngine (Tarea 4). Mismo criterio fail-fast.
   // BOT_ENGINE_ENABLED NO va aquí: es opcional y su ausencia significa off.
   'ANTHROPIC_API_KEY',
+  // Redis para la cola de recordatorios (Tarea 7). La VAR es obligatoria
+  // (fail-fast); el SERVIDOR caído no: ioredis reconecta en background y la
+  // cola es best-effort. REMINDERS_ENABLED / REMINDERS_LEAD_MINUTES no van
+  // aquí: opcionales, su ausencia significa off / antelación por defecto.
+  'REDIS_URL',
 ] as const;
 
 export function validateEnv(

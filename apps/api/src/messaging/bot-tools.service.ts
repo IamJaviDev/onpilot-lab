@@ -44,8 +44,10 @@ const CANCEL_NOT_FOUND_ERROR =
   'No encuentro esa cita entre las citas futuras activas de este teléfono.';
 
 // Nota que crear_cita deja cuando la reserva es para un tercero (T5);
-// listar_mis_citas la parsea para devolver "a nombre de".
-const THIRD_PARTY_NOTE_RE = /^Reserva a nombre de: (.+) \(vía WhatsApp\)$/;
+// listar_mis_citas la parsea para devolver "a nombre de". Exportada (T7):
+// el recordatorio incluye el mismo "a nombre de" si la cita lo tiene.
+export const THIRD_PARTY_NOTE_RE =
+  /^Reserva a nombre de: (.+) \(vía WhatsApp\)$/;
 
 /**
  * Definiciones de las tools del bot (schema tipado para la API de Anthropic).
