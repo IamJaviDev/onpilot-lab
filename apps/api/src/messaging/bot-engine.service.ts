@@ -4,6 +4,10 @@ import Anthropic from '@anthropic-ai/sdk';
 import { DateTime } from 'luxon';
 import { MessageAuthor, MessageDirection } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  formatScheduleSummary,
+  parseWeeklySchedule,
+} from './availability.util';
 import { buildBotSystemPrompt } from './bot-prompt.builder';
 import { BOT_TOOL_DEFINITIONS, BotToolsService } from './bot-tools.service';
 
@@ -235,7 +239,7 @@ export class BotEngineService {
     // otro negocio (regla multi-tenant + docs/09 "datos que no debe recibir").
     const business = await this.prisma.business.findFirst({
       where: { id: businessId, deletedAt: null },
-      select: { name: true, timezone: true },
+      select: { name: true, timezone: true, weeklySchedule: true },
     });
     if (!business) {
       this.logger.warn(
@@ -289,10 +293,19 @@ export class BotEngineService {
       .setLocale('es')
       .toFormat("cccc, d 'de' LLLL 'de' yyyy 'a las' HH:mm");
 
+    // Resumen del horario para el prompt: el bot debe poder decir "los
+    // domingos cerramos" sin gastar una tool, y no juzgar por su cuenta si una
+    // hora es plausible. Sin horario configurado → sin línea (no inventar).
+    const schedule = parseWeeklySchedule(business.weeklySchedule);
+    const scheduleSummary = schedule
+      ? formatScheduleSummary(schedule)
+      : undefined;
+
     const systemPrompt = buildBotSystemPrompt({
       businessName: business.name,
       timezone: business.timezone,
       now,
+      scheduleSummary,
       services: services.map((s) => ({
         id: s.id,
         name: s.name,

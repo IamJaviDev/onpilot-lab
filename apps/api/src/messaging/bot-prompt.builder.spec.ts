@@ -19,6 +19,8 @@ function makeInput(overrides: Partial<BotPromptInput> = {}): BotPromptInput {
     businessName: 'Fruteria Javier',
     timezone: 'Europe/Madrid',
     now: 'martes, 7 de julio de 2026 a las 23:34',
+    scheduleSummary:
+      'lunes a viernes: 9:00-14:00 y 16:00-20:00; sábado: 9:00-14:00; domingo: cerrado',
     services: [
       {
         id: SERVICE_ID_1,
@@ -76,6 +78,22 @@ describe('buildBotSystemPrompt', () => {
       'NUNCA deduzcas la hora del historial de mensajes',
     );
     expect(prompt).toContain('Nunca preguntes al cliente qué día es hoy');
+  });
+
+  it('incluye el resumen del horario cuando existe (para decir "cerramos" sin gastar tool)', () => {
+    const prompt = buildBotSystemPrompt(makeInput());
+
+    expect(prompt).toContain(
+      'Horario del negocio: lunes a viernes: 9:00-14:00 y 16:00-20:00; sábado: 9:00-14:00; domingo: cerrado',
+    );
+  });
+
+  it('omite la línea de horario cuando no hay horario configurado (no inventa)', () => {
+    const prompt = buildBotSystemPrompt(
+      makeInput({ scheduleSummary: undefined }),
+    );
+
+    expect(prompt).not.toContain('Horario del negocio');
   });
 
   it('incluye la regla de identificación SOLO si es la primera respuesta del bot', () => {

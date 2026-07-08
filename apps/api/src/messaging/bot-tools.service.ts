@@ -17,7 +17,12 @@ import {
   ConversationStatus,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { computeFreeSlots, parseWeeklySchedule } from './availability.util';
+import {
+  computeFreeSlots,
+  fitsWithinOpenInterval,
+  formatScheduleSummary,
+  parseWeeklySchedule,
+} from './availability.util';
 
 // Máximo de huecos que se devuelven al modelo (no inflar tokens; si hay más,
 // se indica con masHuecos para que el bot pueda ofrecer "y más").
@@ -408,7 +413,7 @@ export class BotToolsService {
 
     const business = await this.prisma.business.findFirst({
       where: { id: context.businessId, deletedAt: null },
-      select: { timezone: true },
+      select: { timezone: true, weeklySchedule: true },
     });
     if (!business) return this.businessError('Negocio no disponible.');
 
@@ -428,6 +433,39 @@ export class BotToolsService {
       return this.businessError(
         `Esa hora ya pasó: ahora son las ${now.toFormat('HH:mm')}. Ofrece un hueco futuro.`,
       );
+    }
+
+    // Guard de horario: H1 valida solape y no-pasado, pero DESCONOCE el
+    // weeklySchedule. El flujo normal lo tapa (el cliente elige un slot de la
+    // tool), pero un modelo que va directo a crear puede pedir domingo, 22:00
+    // o un hueco entre franjas. Este guard actúa justo cuando el modelo NO
+    // pasó por los slots → no puede ser más laxo que ellos: exige que la cita
+    // COMPLETA (con su duración) quepa en un intervalo abierto, mismo criterio
+    // que computeFreeSlots (comparten fitsWithinOpenInterval). Sin horario
+    // configurado no bloquea (comportamiento actual). La duración sale del
+    // Service; si no existe/está inactivo, se omite el guard y create() da el
+    // error canónico ("Service not found or inactive").
+    const schedule = parseWeeklySchedule(business.weeklySchedule);
+    if (schedule) {
+      const service = await this.prisma.service.findFirst({
+        where: {
+          id: input.serviceId,
+          businessId: context.businessId,
+          isActive: true,
+          deletedAt: null,
+        },
+        select: { durationMinutes: true },
+      });
+      if (
+        service &&
+        !fitsWithinOpenInterval(startsAt, service.durationMinutes, schedule)
+      ) {
+        return this.businessError(
+          `El negocio no está abierto para una cita a esa hora ` +
+            `(horario: ${formatScheduleSummary(schedule)}). ` +
+            `Consulta la disponibilidad para ver los huecos reales.`,
+        );
+      }
     }
 
     const client = await this.resolveClient(context, nombreCliente);

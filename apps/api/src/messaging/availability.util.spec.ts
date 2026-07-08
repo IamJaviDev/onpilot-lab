@@ -1,7 +1,11 @@
+import { DateTime } from 'luxon';
 import {
   computeFreeSlots,
+  fitsWithinOpenInterval,
+  formatScheduleSummary,
   parseWeeklySchedule,
   type ComputeFreeSlotsInput,
+  type WeeklySchedule,
 } from './availability.util';
 
 // Tests del cálculo puro de disponibilidad (T5). Todo se comprueba en
@@ -163,5 +167,111 @@ describe('computeFreeSlots', () => {
     expect(computeFreeSlots(makeInput({ date: 'mañana' }))).toEqual({
       kind: 'invalid_date',
     });
+  });
+});
+
+// Horario partido de referencia para los tests del guard: mañana y tarde el
+// mismo lunes, con el hueco 14:00-16:00 cerrado entre franjas.
+const SPLIT_SCHEDULE: WeeklySchedule = {
+  mon: [
+    { start: '09:00', end: '14:00' },
+    { start: '16:00', end: '20:00' },
+  ],
+};
+
+// Hora local Madrid del lunes de referencia, como DateTime en zona negocio
+// (así llega el startsAt al guard en crear_cita).
+function mondayAt(hhmm: string): DateTime {
+  return DateTime.fromISO(`${MONDAY}T${hhmm}`, { zone: 'Europe/Madrid' });
+}
+
+describe('fitsWithinOpenInterval', () => {
+  it('cita que cabe holgada dentro de una franja → true', () => {
+    expect(fitsWithinOpenInterval(mondayAt('10:00'), 30, SPLIT_SCHEDULE)).toBe(
+      true,
+    );
+  });
+
+  it('la cita CABE JUSTO hasta el cierre (13:30 + 30 = 14:00) → true', () => {
+    expect(fitsWithinOpenInterval(mondayAt('13:30'), 30, SPLIT_SCHEDULE)).toBe(
+      true,
+    );
+  });
+
+  it('el caso clave: empieza en horario pero DESBORDA el cierre (13:45 + 30 = 14:15) → false', () => {
+    expect(fitsWithinOpenInterval(mondayAt('13:45'), 30, SPLIT_SCHEDULE)).toBe(
+      false,
+    );
+  });
+
+  it('servicio corto que sí cabe hasta el cierre (13:45 + 15 = 14:00) → true', () => {
+    expect(fitsWithinOpenInterval(mondayAt('13:45'), 15, SPLIT_SCHEDULE)).toBe(
+      true,
+    );
+  });
+
+  it('antes de abrir (08:00) → false', () => {
+    expect(fitsWithinOpenInterval(mondayAt('08:00'), 30, SPLIT_SCHEDULE)).toBe(
+      false,
+    );
+  });
+
+  it('hueco entre franjas (15:00, con 14:00-16:00 cerrado) → false', () => {
+    expect(fitsWithinOpenInterval(mondayAt('15:00'), 30, SPLIT_SCHEDULE)).toBe(
+      false,
+    );
+  });
+
+  it('día sin intervalos (domingo) → false', () => {
+    // 2026-07-12 es domingo; SPLIT_SCHEDULE no define sun.
+    const sunday = DateTime.fromISO('2026-07-12T10:00', {
+      zone: 'Europe/Madrid',
+    });
+    expect(fitsWithinOpenInterval(sunday, 30, SPLIT_SCHEDULE)).toBe(false);
+  });
+
+  it('duración no positiva → false', () => {
+    expect(fitsWithinOpenInterval(mondayAt('10:00'), 0, SPLIT_SCHEDULE)).toBe(
+      false,
+    );
+  });
+});
+
+describe('formatScheduleSummary', () => {
+  it('agrupa días consecutivos idénticos en rangos y marca cerrados (jornada partida)', () => {
+    const schedule: WeeklySchedule = {
+      mon: [
+        { start: '09:00', end: '14:00' },
+        { start: '16:00', end: '20:00' },
+      ],
+      tue: [
+        { start: '09:00', end: '14:00' },
+        { start: '16:00', end: '20:00' },
+      ],
+      wed: [
+        { start: '09:00', end: '14:00' },
+        { start: '16:00', end: '20:00' },
+      ],
+      thu: [
+        { start: '09:00', end: '14:00' },
+        { start: '16:00', end: '20:00' },
+      ],
+      fri: [
+        { start: '09:00', end: '14:00' },
+        { start: '16:00', end: '20:00' },
+      ],
+      sat: [{ start: '09:00', end: '14:00' }],
+    };
+    expect(formatScheduleSummary(schedule)).toBe(
+      'lunes a viernes: 9:00-14:00 y 16:00-20:00; sábado: 9:00-14:00; domingo: cerrado',
+    );
+  });
+
+  it('día suelto entre cerrados y sin cero inicial de hora', () => {
+    expect(
+      formatScheduleSummary({ wed: [{ start: '08:30', end: '15:00' }] }),
+    ).toBe(
+      'lunes a martes: cerrado; miércoles: 8:30-15:00; jueves a domingo: cerrado',
+    );
   });
 });

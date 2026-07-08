@@ -96,20 +96,10 @@ export function computeFreeSlots(
   const slots: string[] = [];
 
   for (const interval of intervals) {
-    const [startH, startM] = interval.start.split(':').map(Number);
-    const [endH, endM] = interval.end.split(':').map(Number);
-    const intervalStart = day.set({
-      hour: startH,
-      minute: startM,
-      second: 0,
-      millisecond: 0,
-    });
-    const intervalEnd = day.set({
-      hour: endH,
-      minute: endM,
-      second: 0,
-      millisecond: 0,
-    });
+    const { start: intervalStart, end: intervalEnd } = intervalBounds(
+      day,
+      interval,
+    );
 
     for (
       let slot = intervalStart;
@@ -132,4 +122,92 @@ export function computeFreeSlots(
   }
 
   return { kind: 'open', slots };
+}
+
+/**
+ * Materializa un intervalo del horario ("HH:mm") en instantes del día dado
+ * (en la zona de `day`). Punto ÚNICO de conversión hora-de-horario→instante:
+ * lo comparten computeFreeSlots (generar slots) y fitsWithinOpenInterval
+ * (validar una cita) para que el criterio no pueda divergir entre ambos.
+ */
+function intervalBounds(
+  day: DateTime,
+  interval: ScheduleInterval,
+): { start: DateTime; end: DateTime } {
+  const [startH, startM] = interval.start.split(':').map(Number);
+  const [endH, endM] = interval.end.split(':').map(Number);
+  return {
+    start: day.set({ hour: startH, minute: startM, second: 0, millisecond: 0 }),
+    end: day.set({ hour: endH, minute: endM, second: 0, millisecond: 0 }),
+  };
+}
+
+/**
+ * ¿Cabe una cita [start, start+duración) COMPLETA dentro de algún intervalo
+ * abierto del día de `start`? Mismo criterio con el que computeFreeSlots
+ * genera cada slot (inicio dentro y fin ≤ cierre): por eso comparten
+ * intervalBounds. No exige rejilla de 30 min — cualquier minuto de inicio es
+ * válido mientras la cita entera quepa. `start` ya en la zona del negocio.
+ */
+export function fitsWithinOpenInterval(
+  start: DateTime,
+  durationMinutes: number,
+  schedule: WeeklySchedule,
+): boolean {
+  if (durationMinutes <= 0) return false;
+  const intervals = schedule[DAY_KEYS[start.weekday - 1]] ?? [];
+  const end = start.plus({ minutes: durationMinutes });
+  const day = start.startOf('day');
+  return intervals.some((interval) => {
+    const bounds = intervalBounds(day, interval);
+    return start >= bounds.start && end <= bounds.end;
+  });
+}
+
+const DAY_LABELS: Record<DayKey, string> = {
+  mon: 'lunes',
+  tue: 'martes',
+  wed: 'miércoles',
+  thu: 'jueves',
+  fri: 'viernes',
+  sat: 'sábado',
+  sun: 'domingo',
+};
+
+// "09:00" → "9:00": lectura humana en el prompt (sin cero inicial de hora).
+function stripLeadingZero(hhmm: string): string {
+  return hhmm.replace(/^0/, '');
+}
+
+function formatIntervals(intervals: ScheduleInterval[]): string {
+  if (intervals.length === 0) return 'cerrado';
+  return intervals
+    .map((i) => `${stripLeadingZero(i.start)}-${stripLeadingZero(i.end)}`)
+    .join(' y ');
+}
+
+/**
+ * Resumen legible del horario para el prompt del bot: agrupa días consecutivos
+ * con idénticos intervalos en rangos ("lunes a viernes: 9:00-14:00 y
+ * 16:00-20:00; sábado: 9:00-14:00; domingo: cerrado"). Días en singular
+ * (determinista, sin la pluralización irregular del español). Recorre los 7
+ * días en orden mon..sun; un día sin intervalos es "cerrado".
+ */
+export function formatScheduleSummary(schedule: WeeklySchedule): string {
+  const groups: Array<{ first: DayKey; last: DayKey; text: string }> = [];
+  for (const key of DAY_KEYS) {
+    const text = formatIntervals(schedule[key] ?? []);
+    const last = groups[groups.length - 1];
+    if (last && last.text === text) last.last = key;
+    else groups.push({ first: key, last: key, text });
+  }
+  return groups
+    .map((g) => {
+      const days =
+        g.first === g.last
+          ? DAY_LABELS[g.first]
+          : `${DAY_LABELS[g.first]} a ${DAY_LABELS[g.last]}`;
+      return `${days}: ${g.text}`;
+    })
+    .join('; ');
 }

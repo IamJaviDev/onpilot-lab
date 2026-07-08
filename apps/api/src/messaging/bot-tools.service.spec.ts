@@ -479,6 +479,12 @@ describe('BotToolsService — crear_cita', () => {
 
   it('fix reloj: fechaHora futura del mismo día ("hoy más tarde") pasa el guard y crea', async () => {
     const m = makeService();
+    // Sin horario configurado: aísla este test del guard de horario (su
+    // intención es el guard del RELOJ; "now+1h" caería en cualquier día/hora).
+    m.prisma.businessFindFirst.mockResolvedValue({
+      timezone: 'Europe/Madrid',
+      weeklySchedule: null,
+    });
     const masTarde = DateTime.now()
       .setZone('Europe/Madrid')
       .plus({ hours: 1 })
@@ -487,6 +493,109 @@ describe('BotToolsService — crear_cita', () => {
     const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
       ...INPUT,
       fechaHora: masTarde,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(m.appointmentsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('guard horario: cita en domingo (día cerrado) → error con el resumen, sin crear ni resolver cliente', async () => {
+    const m = makeService();
+    // 2026-07-12 es domingo; el schedule del mock (mon 09:00-14:00) no lo abre.
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: '2026-07-12T10:00',
+    });
+
+    expect(outcome.ok).toBe(false);
+    const error = outcome.result.error as string;
+    expect(error).toContain('horario:');
+    expect(error).toContain('Consulta la disponibilidad');
+    expect(m.appointmentsCreate).not.toHaveBeenCalled();
+    expect(m.clientsCreate).not.toHaveBeenCalled();
+  });
+
+  it('guard horario: cita a las 22:00 (fuera de la franja del día) → error, sin crear', async () => {
+    const m = makeService();
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: `${MONDAY}T22:00`,
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toContain('horario:');
+    expect(m.appointmentsCreate).not.toHaveBeenCalled();
+    expect(m.clientsCreate).not.toHaveBeenCalled();
+  });
+
+  it('guard horario: cita a las 15:00 en el hueco entre franjas → error, sin crear', async () => {
+    const m = makeService();
+    m.prisma.businessFindFirst.mockResolvedValue({
+      timezone: 'Europe/Madrid',
+      weeklySchedule: {
+        mon: [
+          { start: '09:00', end: '14:00' },
+          { start: '16:00', end: '20:00' },
+        ],
+      },
+    });
+
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: `${MONDAY}T15:00`,
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toContain('horario:');
+    expect(m.appointmentsCreate).not.toHaveBeenCalled();
+  });
+
+  it('guard horario: el caso clave — la cita DESBORDA el cierre (13:45 + 30 min, cierre 14:00) → error, sin crear', async () => {
+    const m = makeService();
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: `${MONDAY}T13:45`,
+    });
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.result.error).toContain('horario:');
+    expect(m.appointmentsCreate).not.toHaveBeenCalled();
+  });
+
+  it('guard horario: la cita cabe justo hasta el cierre (13:30 + 30 min = 14:00) → crea', async () => {
+    const m = makeService();
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: `${MONDAY}T13:30`,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(m.appointmentsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('guard horario: cita a las 10:00 de un laborable dentro de franja → crea', async () => {
+    const m = makeService();
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      fechaHora: `${MONDAY}T10:00`,
+    });
+
+    expect(outcome.ok).toBe(true);
+    expect(m.appointmentsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('guard horario: sin weeklySchedule configurado → no bloquea, crea (comportamiento actual)', async () => {
+    const m = makeService();
+    m.prisma.businessFindFirst.mockResolvedValue({
+      timezone: 'Europe/Madrid',
+      weeklySchedule: null,
+    });
+
+    const outcome = await m.service.execute(CONTEXT, 'crear_cita', {
+      ...INPUT,
+      // 22:00: fuera de cualquier horario razonable, pero sin schedule no se
+      // valida — el guard solo actúa con horario configurado.
+      fechaHora: `${MONDAY}T22:00`,
     });
 
     expect(outcome.ok).toBe(true);
