@@ -158,6 +158,26 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-08 — FIXES transversales: el reloj y el horario del bot
+
+Dos fixes de la misma familia (el bot y el tiempo), detectados en la verificación en vivo de T7 y commiteados por separado sobre ella.
+
+**FIX 1 — El bot conoce la hora, no solo el día** (`fix(api): el bot conoce la hora actual...`, 95fd0f8)
+- **Síntoma**: a las 23:34 (servidor correcto: now() = 21:34 UTC = 23:34 CEST) el bot dijo "son casi las 19:30" y llamó a crear_cita con `2026-07-08T19:30` — la hora de las pruebas de aquella tarde, **alucinada desde el historial**. Causa: el Fix T5-1 inyectaba la FECHA pero no la HORA; sin dato fresco, el modelo lo saca del contexto viejo (primo del bug de caducidad de T5).
+- **Fix**: el prompt recibe "Ahora es {díaSemana}, {fecha} a las {HH:mm}" en zona negocio + instrucción de usar SIEMPRE esa hora para juzgar "ya pasó"/"cuánto falta" y NUNCA deducirla del historial. Campo `today` → `now` (un campo llamado today con una hora dentro miente al lector). Defensa en profundidad: crear_cita rechaza fechaHora pasada del mismo día con error localizado y accionable ANTES de resolver cliente/entrar en transacción (el `assertNotPast` de H1 queda de backstop: su mensaje es genérico y en inglés, no accionable por el modelo).
+- **Verificado en vivo**: "quiero una cita en 10 minutos" a las 23:52 → "son las 23:52 de hoy miércoles..." ✅
+
+**FIX 2 — El bot respeta y comunica el horario** (`fix(api): el bot respeta y comunica el horario del negocio`, 0a2ece6)
+- **Síntoma/hueco**: `crear_cita` no validaba contra `weeklySchedule` — solo heredaba las validaciones de H1 (solape, no-pasado), que desconocen el horario (lo añadimos en T5 solo para la tool de disponibilidad). El flujo normal lo tapa (el cliente elige un slot propuesto), pero un modelo confundido puede ir directo a crear (evidencia: el 19:30 de las 23:34). Además el bot **no sabía el horario**: decía "no tengo hueco a las 15:00" (infiriendo de la ausencia en la lista de slots) cuando lo correcto es "a esa hora estamos cerrados".
+- **Fix**: (a) guard en crear_cita que valida que la cita **cabe completa** en un intervalo abierto — no solo que el inicio caiga dentro (caso clave: Consulta de 30' a las 13:45 con cierre a las 14:00 → rechazada). `intervalBounds` extraído y **compartido con `computeFreeSlots`**: el guard no puede divergir de los slots ni ser más laxo. (b) `formatScheduleSummary` inyecta el horario legible en el prompt ("lunes a viernes: 9:00-14:00 y 16:00-20:00; sábado: 9:00-14:00; domingo: cerrado") para que el bot diga "los domingos cerramos" sin gastar una tool y sin depender de su sentido común. Sin weeklySchedule → no bloquea y omite la línea (no inventar).
+- Bordes: servicio inexistente/inactivo → se omite el guard y `create()` da el error canónico (no duplicar mensajes).
+
+**Verificación.** lint/typecheck/build; 185 → 204 tests. Verificación en vivo del guard de horario pendiente (requiere toques de WhatsApp): probar cita en domingo, a las 22:00, y a las 13:45 con cierre a las 14:00.
+
+**Nota operativa.** El guard usa el `weeklySchedule` del negocio en BD (sembrado por psql en T5). Si rechaza una hora que parece válida, lo primero a comprobar es que el horario en BD coincida con el esperado.
+
+**Moraleja (afinada, tercera vez).** La verificación en vivo debe cubrir los ejes que un fix anterior parecía cerrar: el bug del reloj escapó a T5 porque allí probamos fechas ("mañana", "el jueves") pero no horas ("en 10 min", "¿ya pasó?"); y el hueco del horario solo apareció al preguntarse, como dueño del negocio y no como programador, "pero si a esa hora está cerrado, ¿no?".
+
 ### 2026-07-08 — H2 Tarea 7: Recordatorios de cita 24h antes (BullMQ + Redis)
 
 **Qué se hizo.** Cierre de la Oleada 1: la dimensión temporal. El bot recuerda la cita al cliente 24h antes por la misma conversación de WhatsApp, y el Redis del docker-compose entra en servicio por primera vez. Cola BullMQ `appointment-reminders`, un job por cita con **jobId determinista = appointmentId** (la clave para cancelarlo/reprogramarlo desde cualquier origen), programado con `delay` hasta (startsAt − 24h). La respuesta del cliente al recordatorio la gestionan T5/T6 gratis por el flujo normal del webhook: aquí solo sale el OUT programado.
