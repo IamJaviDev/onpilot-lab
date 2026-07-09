@@ -158,6 +158,16 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-09 — Smoke test de compilación del grafo DI
+
+**Qué se hizo.** `src/app.module.spec.ts`: un test que hace `Test.createTestingModule({imports:[AppModule]}).compile()`. Caza toda la familia de errores de wiring (guards, providers, exports que faltan) que los tests unitarios no pueden ver, porque instancian servicios a mano y nunca construyen el grafo DI.
+
+**Motivación.** La T8 llegó al CHECK con 215 tests en verde y **la API sin arrancar** (`ConversationsModule` sin `imports: [AuthModule]`). Probado en ambos sentidos: sin el fix, `.compile()` rechaza con el error exacto; con el fix, pasa.
+
+**Decisiones.** `try/finally` con `close()` garantizado, sin `--forceExit` (que escondería fugas de handles reales; el camino feliz cierra BullMQ/ioredis/Prisma limpio). Stub de env mantenido a mano a propósito, con `env.validation.ts` documentado como fuente de verdad: derivarlo automáticamente mataría el aviso cuando alguien añada una var obligatoria. `.compile()` no dispara `onModuleInit` → no toca Postgres.
+
+**Commit.** `test(api): smoke test de compilación del grafo DI (AppModule)`
+
 ### 2026-07-09 — H2 Tarea 8: Panel de conversaciones (lista + hilo, solo lectura)
 
 **Qué se hizo.** Primera tarea de la Oleada 2: el profesional ve por fin sus conversaciones de WhatsApp. Backend: módulo `conversations/` nuevo (lectura), separado de `messaging/` (escritura) — dos responsabilidades distintas. `GET /conversations` (lista paginada, filtro por estado, orden `lastMessageAt DESC nulls last`, preview del último mensaje) y `GET /conversations/:id/messages` (hilo, últimos 100 asc). Frontend: master-detail sobre el sidebar nuevo, con polling. **Solo lectura**: tomar control y responder es la T9.
