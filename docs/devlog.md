@@ -158,6 +158,32 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-09 — H2 Tarea 9: Tomar control / devolver al bot + respuesta manual — H2 COMPLETO
+
+**Qué se hizo.** El panel deja de ser mirador y se convierte en cabina de mando. Tres escrituras nuevas: `PATCH /conversations/:id/take-control` (→ HUMAN_CONTROL), `PATCH /conversations/:id/release` (→ BOT_ACTIVE) y `POST /conversations/:id/messages` (respuesta manual). Frontend: botón contextual en la cabecera del hilo + compositor de mensaje. **Cumple el criterio de lanzable de H2**: el bot atiende y el profesional puede ver qué dice, quitarle el micrófono, responder a mano y devolvérselo.
+
+**Decisiones clave.**
+- **Responder exige tener el control**: `POST /messages` con estado ≠ HUMAN_CONTROL → 409 ("Toma el control antes de escribir"). Si el profesional escribiera con el bot activo, ambos responderían y se pisarían. El botón de tomar control es también el interruptor que apaga al bot.
+- **Enviar primero, persistir después.** Si Meta rechaza, NO queda Message en el hilo. Es el reverso de las confirmaciones fantasma del bot: allí el bot no podía afirmar lo que no había hecho; aquí la BD no puede mostrar un mensaje que el cliente nunca recibió. Test crítico con assert explícito: rechazo de Meta → 422 **y `persistOutgoing` no llamado** (cero Message).
+- Tres códigos HTTP para tres causas: 409 (estado incorrecto/CLOSED), 422 (política de WhatsApp), 502 (fallo de envío). El frontend mapea cada uno a un texto útil.
+- Sin optimistic update: el mensaje aparece cuando el backend confirma que Meta lo aceptó (coherencia con lo anterior). Spinner, no ilusión.
+- `persistOutgoing` generalizado con `author?` (default BOT): los dos llamadores existentes (webhook, reminder processor) intactos. La generalización se anticipó en el asiento de T3.
+- Auditoría solo en transición real (idempotente → 200 sin log, evita ruido). `conversation.manual_message` guarda solo `{length}`, nunca el cuerpo (puede llevar datos del cliente; el Message ya lo persiste).
+- Documentado en el service: `status` tiene **dos escritores independientes** — el bot (`escalar_a_humano` → PENDING_REVIEW, en messaging) y el panel (transiciones, en conversations). Cada uno el suyo; no se coordinan.
+- Módulo: `conversations/` importa `MessagingModule` (que pasa a exportar `WhatsAppAdapter` + `ConversationService`). Grafo acíclico: messaging no conoce conversations.
+
+**Verificación en vivo.** (1) Tomar control → badge "Tú al mando" en cabecera y lista → mensaje escrito desde el panel **llega al móvil**, con burbuja y badge "tú" en el hilo. (2) Con HUMAN_CONTROL, escribo desde el móvil: el bot **calla**, el mensaje aparece en el panel, respondo yo. (3) Devolver al bot → vuelve a contestar. (4) El escalado del bot deja la conversación en "Requieren atención" con "Tomar control" destacado. (5) **La ventana de 24h no es verificable en sandbox**: Meta rechaza los envíos a números no verificados con `code=131030` ("Recipient phone number not in allowed list") antes de que la ventana entre en juego. El mapeo 131047 → 422 está cubierto por test unitario; se verificará en producción.
+
+**Hallazgo y ajuste tras la verificación.** El error genérico del 502 ("Inténtalo de nuevo") era inútil ante un 131030 — reintentar no arregla que el número no esté en la lista del sandbox. Ahora Meta distingue dos rechazos de política, ambos 422 con textos propios: 131047 (ventana 24h → explica lo de las plantillas) y 131030 (sandbox → "añádelo en el panel de Meta, hasta 5 números de prueba"; el error que aparece a diario en desarrollo). El 502 dejó de prometer que reintentar arregla algo. Todos los códigos de Meta viven en el adapter (`isReengagementWindowClosed`, `isRecipientNotAllowed`). Los cuatro textos viven en el **backend** (donde hay cobertura de tests) y el frontend muestra `error.message`: menos duplicación, los cuatro casos verificados. Circuito completo comprobado en vivo: el backend loguea el detalle técnico (code=131030, HTTP 400), el frontend muestra el mensaje humano.
+
+**Commit.** `feat(api,web): tomar control, devolver al bot y respuesta manual`
+
+**Cierra H2 (WhatsApp Automático).** 9 tareas + 4 fixes transversales. El bot escucha, habla, reserva, cancela, reprograma, escala y recuerda — y el profesional lo ve todo y puede tomar el mando cuando quiera.
+
+**Deuda nueva (menor).** `apps/web` no tiene runner de tests: todo el frontend se verifica a ojo. No urge en MVP, pero queda escrito.
+
+**Deuda que bloquea el lanzamiento (no el desarrollo).** Entidad legal → verificación de negocio en Meta → salir del sandbox (hoy solo 5 números de prueba); plantilla HSM para recordatorios (el 131047 en producción); contrato de encargado del tratamiento + cifrado en reposo (RGPD); trust proxy.
+
 ### 2026-07-09 — Smoke test de compilación del grafo DI
 
 **Qué se hizo.** `src/app.module.spec.ts`: un test que hace `Test.createTestingModule({imports:[AppModule]}).compile()`. Caza toda la familia de errores de wiring (guards, providers, exports que faltan) que los tests unitarios no pueden ver, porque instancian servicios a mano y nunca construyen el grafo DI.
