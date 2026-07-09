@@ -25,7 +25,7 @@ export function BottomNav() {
             }`}
           >
             <Icon size={22} />
-            <span>{item.label}</span>
+            <span>{item.shortLabel ?? item.label}</span>
           </Link>
         );
       })}
