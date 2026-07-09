@@ -158,6 +158,26 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-09 — H2 Tarea 8: Panel de conversaciones (lista + hilo, solo lectura)
+
+**Qué se hizo.** Primera tarea de la Oleada 2: el profesional ve por fin sus conversaciones de WhatsApp. Backend: módulo `conversations/` nuevo (lectura), separado de `messaging/` (escritura) — dos responsabilidades distintas. `GET /conversations` (lista paginada, filtro por estado, orden `lastMessageAt DESC nulls last`, preview del último mensaje) y `GET /conversations/:id/messages` (hilo, últimos 100 asc). Frontend: master-detail sobre el sidebar nuevo, con polling. **Solo lectura**: tomar control y responder es la T9.
+
+**Decisiones clave.**
+- **Metadata: whitelist, no blacklist.** Sanitizador puro que copia SOLO `reminder` y `escalation.motivo`; tokens, model, toolCalls, phantomGuard y appointmentId son inalcanzables por construcción — una fuga futura es imposible aunque el bot añada campos. Test con assert campo a campo (las claves resultantes son exactamente las esperadas).
+- **Master-detail con layout anidado de Next** (lista en `conversaciones/layout.tsx`, hilo como `{children}`): la lista no se remonta al navegar entre conversaciones → sin flash, polling continuo, scroll y filtro preservados. Patrón idiomático, no un componente que se remonta.
+- **Sin N+1**: `include` con `take: 1` resuelto por Prisma con `WHERE conversationId IN (...)`. Verificado con el log de queries contra Postgres real: **4 queries constantes** (conversations + client IN + count + messages IN), invariantes con 0 y con 3 filas. (Jest no podía: el engine de Prisma 7 usa dynamic import; se corrió contra el dist compilado con Node real.)
+- Polling con TanStack Query (lista 30s, hilo 10s, `refetchOnWindowFocus`) en vez de websockets: infraestructura nueva innecesaria para un MVP donde el profesional mira puntualmente; migrable después sin tocar la UI.
+- Gate multi-tenant en `:id` → 404 **con el mismo mensaje que "no existe"** (nunca 403 ni texto distinto) y sin llegar a leer mensajes. Lecturas no se auditan (coherente con H1).
+- Badges por estado (verde BOT_ACTIVE / ámbar PENDING_REVIEW / azul HUMAN_CONTROL / gris CLOSED) + filtro "Requieren atención" — la vista que el profesional abrirá cada mañana. Burbujas con badge "🤖 bot" / "tú" (preparado para los HUMAN de T9) y marcadores de "recordatorio automático" y "escaló: {motivo}".
+
+**Tropiezo instructivo.** El backend no arrancaba: `ConversationsModule` usaba `JwtAuthGuard` sin importar `AuthModule` (mismo caso que ClientsModule en H1, ya en el devlog). Los 215 tests pasaron con el arranque roto **porque todos son unitarios**: instancian servicios a mano con Prisma mockeado y nunca construyen el grafo DI. De ahí el smoke test transversal (commit aparte).
+
+**Verificación.** lint/typecheck/build; 215 tests (+11: sanitizador y service). En vivo: las 3 conversaciones reales con preview/estado/hora relativa; hilo completo con burbujas IN/OUT, badge de bot, cabecera con estado y "Ver ficha"; marcadores de recordatorio (el que sonó solo) y de escalado (los dos NO_PUEDO_RESOLVER) presentes; cero telemetría a la vista; 404 con id de otro negocio. La captura del panel muestra, además, el fix del horario en acción ("a las 15:00 el negocio está cerrado, cerramos a las 14:00 y reabrimos a las 16:00").
+
+**Commit.** `feat(api,web): panel de conversaciones (lista + hilo, solo lectura)`
+
+**Deuda nueva (menor).** Hilo limitado a 100 mensajes sin cursor (paginar si aparecen hilos largos). El markdown de WhatsApp (`*negrita*`) se muestra crudo en las burbujas — parsear a `<strong>`. El enlace "Ver ficha" solo aparece con client vinculado (depende de la normalización H1↔E.164, deuda ya abierta) — el panel hace visible esa deuda, que es sano.
+
 ### 2026-07-09 — Frontend fase 3: Layout workspace (sidebar en desktop)
 
 **Qué se hizo.** Tercera y última fase del plan de mejora del frontend (tokens ✅ → vista semanal ✅ → workspace). El marco de desktop pasa de topbar + tabs a un **sidebar de navegación colapsable**; móvil intacto (bottom-nav). Añadida la 5ª entrada "Conversaciones" con página placeholder. Prerequisito de la Oleada 2 de H2: el panel de conversaciones (T8) es un master-detail que pide espacio horizontal y encaja con un rail lateral.
