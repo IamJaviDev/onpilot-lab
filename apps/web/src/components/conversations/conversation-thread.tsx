@@ -8,6 +8,8 @@ import { useSession } from "@/lib/auth/session-context";
 import { useConversationThread } from "@/lib/conversations/queries";
 import { StatusBadge } from "./status-badge";
 import { MessageBubble } from "./message-bubble";
+import { MessageComposer } from "./message-composer";
+import { ThreadActions } from "./thread-actions";
 
 export function ConversationThread({ id }: { id: string }) {
   const { activeBusiness } = useSession();
@@ -80,6 +82,7 @@ export function ConversationThread({ id }: { id: string }) {
             <span className="text-xs text-faint">{thread.phone}</span>
           )}
         </div>
+        <ThreadActions conversationId={id} status={thread.status} />
       </div>
 
       {/* Hilo */}
@@ -97,6 +100,9 @@ export function ConversationThread({ id }: { id: string }) {
           </div>
         )}
       </div>
+
+      {/* Compositor: solo activo en HUMAN_CONTROL. */}
+      <MessageComposer conversationId={id} status={thread.status} />
     </div>
   );
 }

@@ -1,4 +1,14 @@
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
+import type { ConversationService } from '../messaging/conversation.service';
+import {
+  WhatsAppAdapter,
+  WhatsAppSendError,
+} from '../messaging/whatsapp.adapter';
 import type { PrismaService } from '../prisma/prisma.service';
 import { ConversationsService } from './conversations.service';
 
@@ -33,13 +43,17 @@ interface Mocks {
   convFindMany: jest.Mock;
   convCount: jest.Mock;
   convFindFirst: jest.Mock;
+  convUpdateMany: jest.Mock;
   msgFindMany: jest.Mock;
+  sendText: jest.Mock;
+  persistOutgoing: jest.Mock;
 }
 
 function makeService(): Mocks {
   const convFindMany = jest.fn();
   const convCount = jest.fn();
   const convFindFirst = jest.fn();
+  const convUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
   const msgFindMany = jest.fn();
 
   const prisma = {
@@ -47,18 +61,27 @@ function makeService(): Mocks {
       findMany: convFindMany,
       count: convCount,
       findFirst: convFindFirst,
+      updateMany: convUpdateMany,
     },
     message: {
       findMany: msgFindMany,
     },
   } as unknown as PrismaService;
 
+  const sendText = jest.fn();
+  const persistOutgoing = jest.fn().mockResolvedValue(undefined);
+  const adapter = { sendText } as unknown as WhatsAppAdapter;
+  const outgoing = { persistOutgoing } as unknown as ConversationService;
+
   return {
-    service: new ConversationsService(prisma),
+    service: new ConversationsService(prisma, adapter, outgoing),
     convFindMany,
     convCount,
     convFindFirst,
+    convUpdateMany,
     msgFindMany,
+    sendText,
+    persistOutgoing,
   };
 }
 
@@ -284,6 +307,220 @@ describe('ConversationsService', () => {
       });
       expect(args.take).toBe(100);
       expect(args.orderBy).toEqual({ createdAt: 'desc' });
+    });
+  });
+
+  describe('takeControl', () => {
+    it('BOT_ACTIVE → HUMAN_CONTROL (changed) y updateMany por id+businessId', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({ id: CONV_ID, status: 'BOT_ACTIVE' });
+
+      const res = await m.service.takeControl(BUSINESS_A, CONV_ID);
+
+      expect(res).toEqual({
+        id: CONV_ID,
+        status: 'HUMAN_CONTROL',
+        changed: true,
+      });
+      expect(firstCallArgs(m.convUpdateMany).where).toEqual({
+        id: CONV_ID,
+        businessId: BUSINESS_A,
+        deletedAt: null,
+      });
+    });
+
+    it('PENDING_REVIEW → HUMAN_CONTROL (el escalado del bot)', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        status: 'PENDING_REVIEW',
+      });
+      const res = await m.service.takeControl(BUSINESS_A, CONV_ID);
+      expect(res.changed).toBe(true);
+      expect(res.status).toBe('HUMAN_CONTROL');
+    });
+
+    it('ya en HUMAN_CONTROL → idempotente (changed:false, sin updateMany)', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        status: 'HUMAN_CONTROL',
+      });
+      const res = await m.service.takeControl(BUSINESS_A, CONV_ID);
+      expect(res).toEqual({
+        id: CONV_ID,
+        status: 'HUMAN_CONTROL',
+        changed: false,
+      });
+      expect(m.convUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('desde CLOSED → 409', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({ id: CONV_ID, status: 'CLOSED' });
+      await expect(m.service.takeControl(BUSINESS_A, CONV_ID)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(m.convUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('id de otro negocio → 404 genérico', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue(null);
+      await expect(m.service.takeControl(BUSINESS_A, CONV_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('release', () => {
+    it('HUMAN_CONTROL → BOT_ACTIVE (changed)', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        status: 'HUMAN_CONTROL',
+      });
+      const res = await m.service.release(BUSINESS_A, CONV_ID);
+      expect(res).toEqual({ id: CONV_ID, status: 'BOT_ACTIVE', changed: true });
+    });
+
+    it('ya en BOT_ACTIVE → idempotente (sin updateMany)', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({ id: CONV_ID, status: 'BOT_ACTIVE' });
+      const res = await m.service.release(BUSINESS_A, CONV_ID);
+      expect(res.changed).toBe(false);
+      expect(m.convUpdateMany).not.toHaveBeenCalled();
+    });
+
+    it('desde CLOSED → 409', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({ id: CONV_ID, status: 'CLOSED' });
+      await expect(m.service.release(BUSINESS_A, CONV_ID)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('id de otro negocio → 404 genérico', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue(null);
+      await expect(m.service.release(BUSINESS_A, CONV_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('sendManualMessage', () => {
+    it('estado ≠ HUMAN_CONTROL → 409 SIN llamar al adapter ni persistir', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        phone: '+34600000001',
+        status: 'BOT_ACTIVE',
+      });
+
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.toThrow(ConflictException);
+      expect(m.sendText).not.toHaveBeenCalled();
+      expect(m.persistOutgoing).not.toHaveBeenCalled();
+    });
+
+    it('CASO CRÍTICO: 131047 → 422 Y persistOutgoing NO llamado (cero Message)', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        phone: '+34600000001',
+        status: 'HUMAN_CONTROL',
+      });
+      // Ventana de 24h cerrada: metaCode 131047.
+      m.sendText.mockRejectedValue(
+        new WhatsAppSendError('window closed', 131047),
+      );
+
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.toThrow(UnprocessableEntityException);
+      // Mensaje propio de la ventana de 24h (no el del sandbox).
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.toThrow(/24 h/);
+      // El hilo JAMÁS debe mostrar un mensaje que el cliente no recibió.
+      expect(m.persistOutgoing).not.toHaveBeenCalled();
+    });
+
+    it('131030 (sandbox) → 422 con mensaje PROPIO (distinto del de ventana 24h) y sin persistir', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        phone: '+34600000001',
+        status: 'HUMAN_CONTROL',
+      });
+      // Destinatario no permitido en el sandbox: metaCode 131030.
+      m.sendText.mockRejectedValue(
+        new WhatsAppSendError('recipient not allowed', 131030),
+      );
+
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.toThrow(UnprocessableEntityException);
+      // Mensaje propio (habla del sandbox), distinto del de la ventana de 24h.
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.toThrow(/sandbox/i);
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.not.toThrow(/24 h/);
+      expect(m.persistOutgoing).not.toHaveBeenCalled();
+    });
+
+    it('otro error de envío → 502 y sin persistir', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        phone: '+34600000001',
+        status: 'HUMAN_CONTROL',
+      });
+      m.sendText.mockRejectedValue(new WhatsAppSendError('boom', 100));
+
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.toThrow(BadGatewayException);
+      expect(m.persistOutgoing).not.toHaveBeenCalled();
+    });
+
+    it('envío ok → persistOutgoing con author HUMAN y el waMessageId real', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue({
+        id: CONV_ID,
+        phone: '+34600000001',
+        status: 'HUMAN_CONTROL',
+      });
+      m.sendText.mockResolvedValue({ waMessageId: 'wamid.HUMAN.1' });
+
+      const res = await m.service.sendManualMessage(
+        BUSINESS_A,
+        CONV_ID,
+        'hola',
+      );
+
+      expect(res).toEqual({ ok: true });
+      expect(m.sendText).toHaveBeenCalledWith('+34600000001', 'hola');
+      expect(m.persistOutgoing).toHaveBeenCalledWith({
+        businessId: BUSINESS_A,
+        conversationId: CONV_ID,
+        body: 'hola',
+        waMessageId: 'wamid.HUMAN.1',
+        author: 'HUMAN',
+      });
+    });
+
+    it('id de otro negocio → 404 sin tocar el adapter', async () => {
+      const m = makeService();
+      m.convFindFirst.mockResolvedValue(null);
+      await expect(
+        m.service.sendManualMessage(BUSINESS_A, CONV_ID, 'hola'),
+      ).rejects.toThrow(NotFoundException);
+      expect(m.sendText).not.toHaveBeenCalled();
     });
   });
 });

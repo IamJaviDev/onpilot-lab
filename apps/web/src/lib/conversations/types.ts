@@ -68,3 +68,10 @@ export interface ListConversationsParams {
   page?: number;
   limit?: number;
 }
+
+/** Resultado de una transición de estado (take-control / release). */
+export interface TransitionResult {
+  id: string;
+  status: ConversationStatus;
+  changed: boolean;
+}

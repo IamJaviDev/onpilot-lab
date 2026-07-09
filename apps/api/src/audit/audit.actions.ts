@@ -8,6 +8,7 @@ export const AUDIT_RESOURCES = {
   SERVICE: 'Service',
   APPOINTMENT: 'Appointment',
   PAYMENT: 'Payment',
+  CONVERSATION: 'Conversation',
 } as const;
 
 export const AUDIT_ACTIONS = {
@@ -30,4 +31,8 @@ export const AUDIT_ACTIONS = {
 
   PAYMENT_CREATE: 'payment.create',
   PAYMENT_MARK_ERROR: 'payment.mark_error',
+
+  CONVERSATION_TAKE_CONTROL: 'conversation.take_control',
+  CONVERSATION_RELEASE: 'conversation.release',
+  CONVERSATION_MANUAL_MESSAGE: 'conversation.manual_message',
 } as const;

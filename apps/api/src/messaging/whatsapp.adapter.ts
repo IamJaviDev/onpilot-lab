@@ -13,6 +13,11 @@ const SEND_TIMEOUT_MS = 10_000;
 // manejo es futuro. En esta tarea el caso solo se identifica y se loguea claro.
 const META_ERROR_REENGAGEMENT_WINDOW = 131047;
 
+// Código de error de Meta: el destinatario no está en la lista de números
+// permitidos del sandbox (limitación de desarrollo: hasta 5 números de prueba
+// verificados). En producción con número verificado no ocurre.
+const META_ERROR_RECIPIENT_NOT_ALLOWED = 131030;
+
 /**
  * Error propio de envío. Expone el código/subcódigo del error de la Graph API
  * (si Meta llegó a responder) para que el llamante pueda distinguir casos sin
@@ -31,6 +36,11 @@ export class WhatsAppSendError extends Error {
   /** Ventana de 24h cerrada: requiere plantilla de re-engagement (futuro). */
   get isReengagementWindowClosed(): boolean {
     return this.metaCode === META_ERROR_REENGAGEMENT_WINDOW;
+  }
+
+  /** Destinatario no permitido en el sandbox (limitación de desarrollo). */
+  get isRecipientNotAllowed(): boolean {
+    return this.metaCode === META_ERROR_RECIPIENT_NOT_ALLOWED;
   }
 }
 

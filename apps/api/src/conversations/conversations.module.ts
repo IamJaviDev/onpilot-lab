@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { MessagingModule } from '../messaging/messaging.module';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
 
@@ -9,10 +10,12 @@ import { ConversationsService } from './conversations.service';
  * que ClientsModule. PrismaService es global.
  *
  * Importa AuthModule para que el JwtAuthGuard de los endpoints resuelva
- * JwtService (mismo patrón que Clients/Services/Appointments).
+ * JwtService (mismo patrón que Clients/Services/Appointments), y MessagingModule
+ * para reutilizar WhatsAppAdapter + ConversationService en el envío manual (T9).
+ * Acíclico: messaging no conoce conversations.
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, MessagingModule],
   controllers: [ConversationsController],
   providers: [ConversationsService],
 })

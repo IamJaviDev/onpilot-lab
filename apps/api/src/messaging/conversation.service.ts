@@ -37,6 +37,9 @@ export interface OutgoingBotMessage {
   waMessageId: string;
   // Metadata opcional del bot (tokens/modelo) para Message.metadata (Json).
   metadata?: Prisma.InputJsonValue;
+  // Autor del OUT. Default BOT (el caso original). El panel (T9) pasa HUMAN
+  // para los mensajes que el profesional escribe a mano.
+  author?: MessageAuthor;
 }
 
 @Injectable()
@@ -132,12 +135,12 @@ export class ConversationService {
   }
 
   /**
-   * Persiste un mensaje saliente ya enviado por el bot: Message OUT/BOT con el
-   * wamid que devolvió Meta, y actualización de lastMessageAt. El CHECK de
-   * coherencia dirección/autor de la Tarea 1 lo protege además en BD.
+   * Persiste un mensaje saliente ya enviado: Message OUT con el wamid que
+   * devolvió Meta, y actualización de lastMessageAt. El CHECK de coherencia
+   * dirección/autor de la Tarea 1 lo protege además en BD.
    *
-   * `author: BOT` fijo a propósito: las respuestas de humanos (HUMAN) llegan
-   * con la bandeja de la Tarea 6.
+   * `author` por defecto BOT (el caso del bot y los recordatorios); el panel
+   * (T9) pasa HUMAN para las respuestas manuales del profesional.
    */
   async persistOutgoing(msg: OutgoingBotMessage): Promise<void> {
     await this.prisma.$transaction([
@@ -146,7 +149,7 @@ export class ConversationService {
           businessId: msg.businessId,
           conversationId: msg.conversationId,
           direction: MessageDirection.OUT,
-          author: MessageAuthor.BOT,
+          author: msg.author ?? MessageAuthor.BOT,
           body: msg.body,
           waMessageId: msg.waMessageId,
           // undefined = columna no seteada (queda NULL), sin rama condicional.

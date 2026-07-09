@@ -32,5 +32,8 @@ import { WhatsAppAdapter } from './whatsapp.adapter';
     BotToolsService,
     ReminderProcessor,
   ],
+  // Exportados para el panel (T9): el envío manual reutiliza el mismo adapter
+  // de Meta y la persistencia OUT (con author HUMAN).
+  exports: [WhatsAppAdapter, ConversationService],
 })
 export class MessagingModule {}
