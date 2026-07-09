@@ -158,6 +158,22 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-09 — Frontend fase 3: Layout workspace (sidebar en desktop)
+
+**Qué se hizo.** Tercera y última fase del plan de mejora del frontend (tokens → vista semanal → workspace). Se sustituye el marco de desktop (topbar + tabs) por un **rail lateral de navegación colapsable**; móvil queda intacto (topbar compacta + bottom-nav). Entra ya la 5ª entrada **"Conversaciones"** (icono `MessageCircle`) apuntando a una página placeholder "Próximamente", para que la Oleada 2 de H2 (panel master-detail de conversaciones, T8) solo rellene la página sin volver a tocar navegación. **Solo el shell**: cero cambios en las 4 pantallas (Inicio/Agenda/Clientes/Caja).
+
+**Decisiones clave (SPEC/PLAN).**
+- **Sidebar solo en desktop.** Un sidebar en móvil es antipatrón; el bottom-nav actual funciona. `app-shell` pasa a `flex-col md:flex-row` (columna en móvil: topbar→main→bottom-nav; fila en desktop: sidebar│main) con un único contenedor responsive.
+- **`NAV_ITEMS` fuente única de verdad.** El 5º item se define una sola vez y propaga a sidebar (label completo "Conversaciones") y bottom-nav. Campo nuevo `shortLabel?` opcional: "Chats" en el bottom-nav (a 5 columnas, 10px, "Conversaciones" se apretaba; "Chats" es corto y no se confunde con las burbujas del hilo).
+- **Sidebar nav-only, colapsable.** Negocio arriba, secciones en el centro (activo por ruta con el mismo `isActive` de siempre, verde de marca), colapsar + logout abajo. Ancho `w-60`↔`w-16`. Estado colapsado en `useState` — **sin browser storage** (restricción del proyecto); sobrevive a la navegación por montarse el shell en el layout del grupo `(app)`.
+- **Topbar de desktop eliminada.** Con el sidebar asumiendo negocio + logout + navegación, la topbar quedaba sin propósito; cada pantalla ya tiene su propio `<h1>`. `desktop-nav.tsx` borrado (superado por el sidebar; **misma frontera client** que tenía — reemplazo 1:1, nada pasó de server a client).
+
+**CHECK.** lint + typecheck + build en verde. Diff CERO en las 4 pantallas (verificado por `git status`: solo cambian archivos del shell). Sin referencias a `localStorage`/`sessionStorage`. `app-shell` y `(app)/layout` siguen siendo server components; la página placeholder también (sin hooks). Verificación en vivo (navegar las 5 entradas, colapsar/expandir, móvil con 5 items) la hace Javier.
+
+**Commit.** `feat(web): layout workspace con sidebar en desktop + entrada de Conversaciones`
+
+**Nota.** En el rail colapsado (64px) el wordmark completo no cabe: se muestra una "o" verde como marca reducida. Pendiente de validación visual; si canta, cambiar por logo-icono.
+
 ### 2026-07-08 — FIXES transversales: el reloj y el horario del bot
 
 Dos fixes de la misma familia (el bot y el tiempo), detectados en la verificación en vivo de T7 y commiteados por separado sobre ella.
