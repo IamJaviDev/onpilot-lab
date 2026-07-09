@@ -160,19 +160,25 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ### 2026-07-09 — Frontend fase 3: Layout workspace (sidebar en desktop)
 
-**Qué se hizo.** Tercera y última fase del plan de mejora del frontend (tokens → vista semanal → workspace). Se sustituye el marco de desktop (topbar + tabs) por un **rail lateral de navegación colapsable**; móvil queda intacto (topbar compacta + bottom-nav). Entra ya la 5ª entrada **"Conversaciones"** (icono `MessageCircle`) apuntando a una página placeholder "Próximamente", para que la Oleada 2 de H2 (panel master-detail de conversaciones, T8) solo rellene la página sin volver a tocar navegación. **Solo el shell**: cero cambios en las 4 pantallas (Inicio/Agenda/Clientes/Caja).
+**Qué se hizo.** Tercera y última fase del plan de mejora del frontend (tokens ✅ → vista semanal ✅ → workspace). El marco de desktop pasa de topbar + tabs a un **sidebar de navegación colapsable**; móvil intacto (bottom-nav). Añadida la 5ª entrada "Conversaciones" con página placeholder. Prerequisito de la Oleada 2 de H2: el panel de conversaciones (T8) es un master-detail que pide espacio horizontal y encaja con un rail lateral.
 
-**Decisiones clave (SPEC/PLAN).**
-- **Sidebar solo en desktop.** Un sidebar en móvil es antipatrón; el bottom-nav actual funciona. `app-shell` pasa a `flex-col md:flex-row` (columna en móvil: topbar→main→bottom-nav; fila en desktop: sidebar│main) con un único contenedor responsive.
-- **`NAV_ITEMS` fuente única de verdad.** El 5º item se define una sola vez y propaga a sidebar (label completo "Conversaciones") y bottom-nav. Campo nuevo `shortLabel?` opcional: "Chats" en el bottom-nav (a 5 columnas, 10px, "Conversaciones" se apretaba; "Chats" es corto y no se confunde con las burbujas del hilo).
-- **Sidebar nav-only, colapsable.** Negocio arriba, secciones en el centro (activo por ruta con el mismo `isActive` de siempre, verde de marca), colapsar + logout abajo. Ancho `w-60`↔`w-16`. Estado colapsado en `useState` — **sin browser storage** (restricción del proyecto); sobrevive a la navegación por montarse el shell en el layout del grupo `(app)`.
-- **Topbar de desktop eliminada.** Con el sidebar asumiendo negocio + logout + navegación, la topbar quedaba sin propósito; cada pantalla ya tiene su propio `<h1>`. `desktop-nav.tsx` borrado (superado por el sidebar; **misma frontera client** que tenía — reemplazo 1:1, nada pasó de server a client).
+**Decisiones clave.**
+- Sidebar solo en desktop (≥md); en móvil el bottom-nav se mantiene (un sidebar en móvil es antipatrón). El "d-sidebar" del demo era la lista de clientes = contenido de pantalla, no navegación — descartado ya en su día.
+- El sidebar es SOLO navegación: negocio arriba, 5 secciones, logout abajo. Ancho con labels (w-60), colapsable a rail de iconos (w-16) con `useState` en el layout — **sin browser storage** (restricción del proyecto); sobrevive a la navegación por estar montado en el grupo (app).
+- `desktop-nav.tsx` **eliminado** (su función migra 1:1 al sidebar; no dejar código muerto). El sidebar hereda exactamente la misma frontera client que tenía desktop-nav: nada pasó de server a client (app-shell y las páginas siguen siendo server components).
+- `NAV_ITEMS` sigue siendo fuente única; se le añade un campo opcional `shortLabel` para el bottom-nav móvil ("Chats"), porque "Conversaciones" (14 chars) se aprieta en 5 columnas de ~75px. En el sidebar desktop va el label completo.
+- La 5ª entrada entra YA apuntando a `/conversaciones` con placeholder "Próximamente" (patrón de Caja): así la T8 solo rellena la página, sin volver a tocar navegación.
+- Alcance estricto: **cero cambios en las 4 pantallas** (verificado por `git status`, ni una línea de sus archivos). Su contenido conserva el ancho (`max-w-2xl`); solo cambia su posición relativa dentro del main.
 
-**CHECK.** lint + typecheck + build en verde. Diff CERO en las 4 pantallas (verificado por `git status`: solo cambian archivos del shell). Sin referencias a `localStorage`/`sessionStorage`. `app-shell` y `(app)/layout` siguen siendo server components; la página placeholder también (sin hooks). Verificación en vivo (navegar las 5 entradas, colapsar/expandir, móvil con 5 items) la hace Javier.
+**Verificación.** lint/typecheck/build limpios (`/conversaciones` en el árbol de rutas). Grep: 0 referencias a localStorage/sessionStorage. Visual (verificada por mí en navegador): 5 entradas navegando y marcando activa, colapsar/expandir, las 4 pantallas íntegras, placeholder de Conversaciones, y bottom-nav móvil con los 5 items sin apretarse.
+
+**Archivos.** Nuevos: `sidebar.tsx`, `(app)/conversaciones/page.tsx`. Modificados: `nav-items.ts` (+item, +shortLabel opcional), `bottom-nav.tsx` (1 línea), `app-shell.tsx` (flex-col md:flex-row + Sidebar). Eliminado: `desktop-nav.tsx`.
 
 **Commit.** `feat(web): layout workspace con sidebar en desktop + entrada de Conversaciones`
 
-**Nota.** En el rail colapsado (64px) el wordmark completo no cabe: se muestra una "o" verde como marca reducida. Pendiente de validación visual; si canta, cambiar por logo-icono.
+**Deuda nueva (menor).** Marca reducida en el rail colapsado: hoy una "o" verde (el wordmark no cabe a 64px) — sustituir por isotipo cuando exista. El estado colapsado no persiste entre sesiones (por la restricción de storage); si se quiere persistente, cookie o preferencia de usuario en backend.
+
+**Cierra.** Plan de mejora del frontend completo (design tokens → vista semanal → workspace). Siguiente: H2 Oleada 2 (T8 panel de conversaciones, T9 tomar control).
 
 ### 2026-07-08 — FIXES transversales: el reloj y el horario del bot
 
