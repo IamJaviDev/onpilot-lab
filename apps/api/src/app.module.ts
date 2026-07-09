@@ -7,6 +7,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CashModule } from './cash/cash.module';
 import { ClientsModule } from './clients/clients.module';
+import { ConversationsModule } from './conversations/conversations.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { PaymentsModule } from './payments/payments.module';
@@ -27,6 +28,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CashModule,
     DashboardModule,
     MessagingModule,
+    ConversationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
