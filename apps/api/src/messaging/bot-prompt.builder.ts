@@ -31,6 +31,12 @@ export interface BotPromptInput {
   // hora del día desde el historial y razona mal sobre "ya pasó" / "en N min"
   // (fix del reloj).
   now: string;
+  // Mini-calendario de los próximos 7 días ("Calendario de los próximos 7 días
+  // (...): lunes=2026-07-13 · …"), ya formateado por el BotEngine (luxon, misma
+  // zona y mismo instante que `now`). El modelo debe convertir "el lunes" en
+  // fecha leyéndolo de aquí, NO calculándolo: el mapeo palabra→fecha lo hacía
+  // mal antes de consultar ninguna tool (fix de fechas relativas).
+  calendar: string;
   // Resumen legible del horario semanal ("lunes a viernes: 9:00-14:00…"), ya
   // formateado por el BotEngine (availability.util). Ausente (sin horario
   // configurado) = la línea se omite; el bot no inventa horario.
@@ -49,13 +55,14 @@ export function buildBotSystemPrompt(input: BotPromptInput): string {
     businessName,
     timezone,
     now,
+    calendar,
     scheduleSummary,
     services,
     isFirstBotReply,
   } = input;
 
   const scheduleLine = scheduleSummary
-    ? `\n- Horario del negocio: ${scheduleSummary}. Si te piden cita un día u hora en que está cerrado, dilo con naturalidad ("ese día cerramos", "a esa hora ya está cerrado") sin gastar una consulta.`
+    ? `\n- Horario del negocio: ${scheduleSummary}. Si te piden cita un día u hora en que está cerrado, dilo con naturalidad ("ese día cerramos", "a esa hora ya está cerrado") sin gastar una consulta. El horario indicado es la ÚNICA verdad sobre qué días abre o cierra el negocio: nunca afirmes que un día está cerrado si este horario dice lo contrario.`
     : '';
 
   const servicesSection =
@@ -89,6 +96,7 @@ ${firstReplySection}
 ## Datos reales del negocio
 - Ahora es ${now}. Calcula cualquier fecha relativa ("mañana", "el viernes") a partir de aquí, SIEMPRE con este año. Usa SIEMPRE esta hora del sistema para juzgar si un momento ya pasó o cuánto falta; NUNCA deduzcas la hora del historial de mensajes. Nunca preguntes al cliente qué día es hoy.
 - Zona horaria del negocio: ${timezone} (úsala para cualquier referencia temporal).${scheduleLine}
+- ${calendar}. Cuando el cliente nombre un día de la semana ("el lunes", "el martes"), usa SIEMPRE este calendario para convertirlo en fecha — nunca lo calcules tú. Si el cliente te corrige sobre qué día es una fecha, vuelve a mirar este calendario en vez de repetir tu afirmación.
 - ${servicesSection}
 
 ## Reglas de información

@@ -5,6 +5,7 @@ import { DateTime } from 'luxon';
 import { MessageAuthor, MessageDirection } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
+  buildUpcomingWeekCalendar,
   formatScheduleSummary,
   parseWeeklySchedule,
 } from './availability.util';
@@ -288,10 +289,13 @@ export class BotEngineService {
     // fecha construía años pasados (fix post-T5); sin la hora alucinaba la
     // hora del día desde el historial ("son casi las 19:30" a las 23:34) y
     // razonaba mal sobre "ya pasó" / "en 10 min" (fix del reloj).
-    const now = DateTime.now()
-      .setZone(business.timezone)
-      .setLocale('es')
-      .toFormat("cccc, d 'de' LLLL 'de' yyyy 'a las' HH:mm");
+    const nowZoned = DateTime.now().setZone(business.timezone).setLocale('es');
+    const now = nowZoned.toFormat("cccc, d 'de' LLLL 'de' yyyy 'a las' HH:mm");
+
+    // Mini-calendario de los próximos 7 días desde el MISMO instante y zona que
+    // `now`: el modelo mapeaba "el lunes" → fecha antes de consultar tools y
+    // confabulaba el día. Con el calendario resuelto no tiene que calcular.
+    const calendar = buildUpcomingWeekCalendar(nowZoned);
 
     // Resumen del horario para el prompt: el bot debe poder decir "los
     // domingos cerramos" sin gastar una tool, y no juzgar por su cuenta si una
@@ -305,6 +309,7 @@ export class BotEngineService {
       businessName: business.name,
       timezone: business.timezone,
       now,
+      calendar,
       scheduleSummary,
       services: services.map((s) => ({
         id: s.id,

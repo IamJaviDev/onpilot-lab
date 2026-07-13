@@ -19,6 +19,11 @@ function makeInput(overrides: Partial<BotPromptInput> = {}): BotPromptInput {
     businessName: 'Fruteria Javier',
     timezone: 'Europe/Madrid',
     now: 'martes, 7 de julio de 2026 a las 23:34',
+    calendar:
+      'Calendario de los próximos 7 días (Europe/Madrid): ' +
+      'martes=2026-07-07 (hoy) · miércoles=2026-07-08 · jueves=2026-07-09 · ' +
+      'viernes=2026-07-10 · sábado=2026-07-11 · domingo=2026-07-12 · ' +
+      'lunes=2026-07-13',
     scheduleSummary:
       'lunes a viernes: 9:00-14:00 y 16:00-20:00; sábado: 9:00-14:00; domingo: cerrado',
     services: [
@@ -86,6 +91,50 @@ describe('buildBotSystemPrompt', () => {
     expect(prompt).toContain(
       'Horario del negocio: lunes a viernes: 9:00-14:00 y 16:00-20:00; sábado: 9:00-14:00; domingo: cerrado',
     );
+  });
+
+  it('fix fechas relativas: inyecta el calendario y ordena mapear el día desde él, no calcularlo', () => {
+    const prompt = buildBotSystemPrompt(makeInput());
+
+    // El calendario del input entra tal cual.
+    expect(prompt).toContain(
+      'Calendario de los próximos 7 días (Europe/Madrid): martes=2026-07-07 (hoy)',
+    );
+    // La biyección es la propiedad de la que depende el fix: exactamente 7 días
+    // y ningún nombre de día repetido. Si un día se repitiera, el modelo
+    // volvería a tener que elegir ocurrencia (el bug que eliminamos).
+    const calendarLine = prompt
+      .split('\n')
+      .find((l) => l.includes('Calendario de los próximos 7 días'))!;
+    const entries = calendarLine
+      .split('Europe/Madrid): ')[1]
+      .split('.')[0]
+      .split(' · ');
+    expect(entries).toHaveLength(7);
+    const dayNames = entries.map((e) => e.split('=')[0].trim());
+    expect(new Set(dayNames).size).toBe(7);
+
+    // Instrucción 2: usar SIEMPRE el calendario y re-mirarlo si el cliente
+    // corrige, en vez de calcular o insistir.
+    expect(prompt).toContain(
+      'usa SIEMPRE este calendario para convertirlo en fecha — nunca lo calcules tú',
+    );
+    expect(prompt).toContain(
+      'vuelve a mirar este calendario en vez de repetir tu afirmación',
+    );
+  });
+
+  it('fix fechas relativas: refuerza que el horario es la ÚNICA verdad sobre abierto/cerrado (solo si hay horario)', () => {
+    const withSchedule = buildBotSystemPrompt(makeInput());
+    expect(withSchedule).toContain(
+      'El horario indicado es la ÚNICA verdad sobre qué días abre o cierra el negocio: nunca afirmes que un día está cerrado si este horario dice lo contrario',
+    );
+
+    // Sin horario configurado no se referencia un horario inexistente.
+    const withoutSchedule = buildBotSystemPrompt(
+      makeInput({ scheduleSummary: undefined }),
+    );
+    expect(withoutSchedule).not.toContain('ÚNICA verdad sobre qué días abre');
   });
 
   it('omite la línea de horario cuando no hay horario configurado (no inventa)', () => {

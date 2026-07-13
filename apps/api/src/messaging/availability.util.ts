@@ -211,3 +211,26 @@ export function formatScheduleSummary(schedule: WeeklySchedule): string {
     })
     .join('; ');
 }
+
+/**
+ * Mini-calendario de los próximos 7 días para el prompt del bot (fix de fechas
+ * relativas): "día=fecha" por cada uno de los 7 días consecutivos desde hoy, en
+ * la zona del negocio. 7 días consecutivos = cada nombre de día aparece
+ * EXACTAMENTE una vez (biyección día→fecha): así el modelo convierte "el lunes"
+ * en una fecha concreta sin tener que elegir entre ocurrencias — que es
+ * justamente la elección que le hacía confabular el día.
+ *
+ * Recibe el DateTime YA en la zona del negocio (el MISMO `nowZoned` que alimenta
+ * el "Ahora es…") para que fecha y calendario no discrepen alrededor de
+ * medianoche. El primer día (hoy) se marca "(hoy)".
+ */
+export function buildUpcomingWeekCalendar(zonedNow: DateTime): string {
+  const today = zonedNow.startOf('day').setLocale('es');
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = today.plus({ days: i });
+    const label = `${d.toFormat('cccc')}=${d.toFormat('yyyy-MM-dd')}`;
+    days.push(i === 0 ? `${label} (hoy)` : label);
+  }
+  return `Calendario de los próximos 7 días (${zonedNow.zoneName}): ${days.join(' · ')}`;
+}

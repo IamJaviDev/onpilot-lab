@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import {
+  buildUpcomingWeekCalendar,
   computeFreeSlots,
   fitsWithinOpenInterval,
   formatScheduleSummary,
@@ -272,6 +273,41 @@ describe('formatScheduleSummary', () => {
       formatScheduleSummary({ wed: [{ start: '08:30', end: '15:00' }] }),
     ).toBe(
       'lunes a martes: cerrado; miércoles: 8:30-15:00; jueves a domingo: cerrado',
+    );
+  });
+});
+
+describe('buildUpcomingWeekCalendar', () => {
+  // Fecha fija cruzando el fin de año: 29/12/2026 (martes) → las fechas deben
+  // saltar a 2027 con luxon sumando días reales, no concatenando strings.
+  const zonedNow = DateTime.fromISO('2026-12-29T23:34:00', {
+    zone: 'Europe/Madrid',
+  }).setLocale('es');
+
+  it('lista los 7 días consecutivos desde hoy, cruzando fin de año, con hoy marcado', () => {
+    expect(buildUpcomingWeekCalendar(zonedNow)).toBe(
+      'Calendario de los próximos 7 días (Europe/Madrid): ' +
+        'martes=2026-12-29 (hoy) · miércoles=2026-12-30 · jueves=2026-12-31 · ' +
+        'viernes=2027-01-01 · sábado=2027-01-02 · domingo=2027-01-03 · ' +
+        'lunes=2027-01-04',
+    );
+  });
+
+  it('biyección día→fecha: exactamente 7 días y ningún nombre de día repetido', () => {
+    const calendar = buildUpcomingWeekCalendar(zonedNow);
+    const entries = calendar.split(': ')[1].split(' · ');
+    expect(entries).toHaveLength(7);
+
+    const dayNames = entries.map((e) => e.split('=')[0]);
+    expect(new Set(dayNames).size).toBe(7);
+  });
+
+  it('usa la zona recibida para el label (no diverge de "Ahora es")', () => {
+    const inCanary = DateTime.fromISO('2026-12-29T23:34:00', {
+      zone: 'Atlantic/Canary',
+    }).setLocale('es');
+    expect(buildUpcomingWeekCalendar(inCanary)).toContain(
+      '(Atlantic/Canary): martes=2026-12-29 (hoy)',
     );
   });
 });
