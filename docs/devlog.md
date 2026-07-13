@@ -158,6 +158,24 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-13 — FIX: resolución de fechas relativas y confabulación de horario (mini-calendario en el prompt)
+
+**Qué se hizo.** El bot resolvía mal los días relativos y llegó a confabular el horario. Evidencia real (conversación del viernes 10/07): cliente pidió "el lunes a las 11" (lunes 13) → el bot ofreció martes 14, afirmó "el lunes 14 estamos cerrados (abrimos de martes a viernes)" — doble confabulación (el lunes era el 13, y el horario del prompt dice L-V), y tras dos correcciones del cliente reservó el **miércoles 15**, el día equivocado. La causa: el mapeo palabra→fecha ("el lunes" → fecha) lo hacía el modelo antes de llamar a ninguna tool; el `diaSemana` que devuelven las tools solo corrige la etiqueta de un slot ya calculado, no la intención inicial.
+
+**Decisiones clave.**
+- **Mini-calendario en el prompt** (`buildUpcomingWeekCalendar` en availability.util, helper puro): 7 días consecutivos desde hoy con formato `día=fecha`, hoy marcado `(hoy)`, en zona del negocio. La ventana de 7 días garantiza **biyección día→fecha** (cada nombre de día aparece exactamente una vez, apuntando a su ocurrencia más próxima) — una ventana más larga reintroduciría la elección que queremos eliminar. El mapeo llega resuelto; el modelo ya no calcula fechas.
+- Instrucción: usar SIEMPRE el calendario para convertir un día nombrado en fecha, nunca calcularlo; si el cliente corrige, re-mirar el calendario en vez de repetir.
+- Refuerzo del horario (dentro de scheduleLine, solo si hay horario): "el horario indicado es la ÚNICA verdad sobre qué días abre o cierra; nunca afirmes que un día está cerrado si el horario dice lo contrario".
+- `nowZoned` extraído como instante único en el engine: el calendario y el "Ahora es..." se calculan del mismo, para que no discrepen de día alrededor de medianoche.
+- Fix de prompt puro + cálculo en el engine; las tools no cambian.
+
+**Verificación.** lint/typecheck/build; 52/52 en los specs tocados (biyección asertada: 7 días sin repetidos; caso fin de año 29/12→4/1; zona coherente). En vivo (lunes 13): "cita el miércoles por la mañana" → resuelve al **miércoles 15** correcto, sin cabezotear (y respeta el hueco ocupado de las 11:00, ofreciendo alrededor); "¿cerráis el lunes?" → "no, abrimos L-V, el domingo es el único día que cerramos" (la confabulación del viernes, corregida).
+
+**Commit.** `fix(api): resolución de fechas relativas y horario del bot (mini-calendario en el prompt)`
+
+**Deuda descubierta (para el Camino A, inmediata).** `bot-tools.service.spec.ts` tiene 13 tests NO DETERMINISTAS que dependen del reloj real (fijan expectativas para 2026-07-13 pero usan la fecha actual en el cálculo → pasan o fallan según el día de ejecución). Confirmado con git stash que fallan en main sin este fix — no es regresión. Fix: inyectar fecha/now fija (mock) para que sean deterministas. Un test que depende del reloj no protege de nada.
+
+
 ### 2026-07-09 — H2 Tarea 9: Tomar control / devolver al bot + respuesta manual — H2 COMPLETO
 
 **Qué se hizo.** El panel deja de ser mirador y se convierte en cabina de mando. Tres escrituras nuevas: `PATCH /conversations/:id/take-control` (→ HUMAN_CONTROL), `PATCH /conversations/:id/release` (→ BOT_ACTIVE) y `POST /conversations/:id/messages` (respuesta manual). Frontend: botón contextual en la cabecera del hilo + compositor de mensaje. **Cumple el criterio de lanzable de H2**: el bot atiende y el profesional puede ver qué dice, quitarle el micrófono, responder a mano y devolvérselo.
