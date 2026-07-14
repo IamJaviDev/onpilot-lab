@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { DateTime } from 'luxon';
+import { DateTime, Settings } from 'luxon';
 import type { AppointmentsService } from '../appointments/appointments.service';
 import type { ClientsService } from '../clients/clients.service';
 import {
@@ -29,8 +29,51 @@ const PHONE = '+34600000001';
 
 const CONTEXT = { businessId: BUSINESS_ID, conversationId: CONVERSATION_ID };
 
-// 2026-07-13 es lunes, futuro respecto a los tests.
+// 2026-07-13 es lunes, futuro respecto al reloj fijo del spec (FIXED_TS).
 const MONDAY = '2026-07-13';
+
+// Reloj fijo del spec. Todo lo temporal del código bajo test —luxon
+// DateTime.now() (bot-tools.service.ts:322,:431) y new Date() (:352,:561,:649)—
+// cuelga de este instante. NO volver a anclar los tests a fechas relativas a
+// "hoy": ese fue el bug #4 (13 tests fallando el 13/07 → 16 el 14/07; el conteo
+// dependía del día de ejecución). 2026-07-10 09:00 en Europe/Madrid (verano,
+// UTC+2) hace que 12, 13 y 14 de julio sean FUTURO respecto a este now, que es
+// lo que sus tests prometen. Se construye con luxon para ser DST-safe.
+const FIXED_TS = DateTime.fromISO('2026-07-10T09:00', {
+  zone: 'Europe/Madrid',
+}).toMillis();
+
+beforeEach(() => {
+  // luxon: DateTime.now() respeta Settings.now; los fake timers de Jest NO lo
+  // tocan, hay que fijarlo aparte.
+  Settings.now = () => FIXED_TS;
+  // Date nativo: fingimos SOLO Date (no setTimeout/microtasks) para no colgar
+  // los await del código async bajo test. new Date() y Date.now() → FIXED_TS.
+  jest.useFakeTimers({
+    now: FIXED_TS,
+    doNotFake: [
+      'nextTick',
+      'setImmediate',
+      'setTimeout',
+      'setInterval',
+      'clearImmediate',
+      'clearTimeout',
+      'clearInterval',
+      'queueMicrotask',
+      'requestAnimationFrame',
+      'cancelAnimationFrame',
+      'requestIdleCallback',
+      'cancelIdleCallback',
+      'performance',
+      'hrtime',
+    ],
+  });
+});
+
+afterEach(() => {
+  Settings.now = () => Date.now(); // default de luxon, ya con Date real
+  jest.useRealTimers();
+});
 
 interface Mocks {
   service: BotToolsService;
