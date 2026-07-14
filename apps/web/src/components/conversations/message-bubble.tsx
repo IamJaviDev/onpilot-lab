@@ -1,6 +1,7 @@
 "use client";
 
 import { formatClockTime } from "@/lib/format";
+import { renderMessageBody } from "@/lib/conversations/render-message-body";
 import type { ThreadMessage } from "@/lib/conversations/types";
 
 /** Etiqueta del autor en los OUT: bot vs. persona del equipo (T9). */
@@ -40,7 +41,9 @@ export function MessageBubble({
               : "rounded-bl-sm bg-white text-ink"
           } border ${isOut ? "border-transparent" : "border-border"}`}
         >
-          <p className="whitespace-pre-wrap break-words">{message.body}</p>
+          <p className="whitespace-pre-wrap break-words">
+            {renderMessageBody(message.body)}
+          </p>
         </div>
 
         {meta?.reminder ? (
