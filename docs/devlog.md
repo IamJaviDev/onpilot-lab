@@ -69,6 +69,9 @@ lo cerró.
   día de ejecución). Confirmado con git stash que fallan en main sin relación con ningún fix. Fix:
   inyectar fecha/now fija (mock de DateTime.now o parámetro) para hacerlos deterministas.
   _(Generado en Fix de fechas relativas, 13/07/26.)_
+  - [ ] **`baseUrl` deprecado en apps/api/tsconfig.json (:16).** TypeScript avisa de que dejará de
+  funcionar en TS 7.0 (hoy solo warning del editor; typecheck/build pasan). Migrar (paths sin baseUrl)
+  o silenciar con `ignoreDeprecations` cuando se acerque TS 7. Sin urgencia. _(Detectado en fix de tests, 14/07/26.)_
 
 ### IA / Bot (H2)
 - [ ] **Plantilla HSM para recordatorios fuera de ventana (DESTACADA).** El recordatorio 24h
@@ -173,6 +176,22 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 
 ## Asientos
+
+### 2026-07-14 — FIX: tests deterministas en bot-tools.service.spec.ts (reloj fijo)
+
+**Qué se hizo.** Los tests de `bot-tools.service.spec.ts` dependían del reloj real: fijaban expectativas para fechas ancladas a "hoy" (`MONDAY = '2026-07-13'` + dos más) mientras el código bajo test lee el reloj del sistema —luxon `DateTime.now()` (bot-tools.service.ts:322, :431) y `new Date()` (:352, :561, :649)—, así que pasaban o fallaban según el día de ejecución. Firma del bug: el 13/07 fallaban 13; el 14/07 ya fallaban 16 — el conteo dependía del día. Fix: reloj fijo en el spec, sin tocar producción.
+
+**Decisiones clave.**
+- **Mock de spec, no inyección en producción.** El `DateTime.now()` directo de las tools es correcto en producción (alimenta guards "¿ya pasó?", no es conducta que necesite control determinista como el `nowZoned` del engine). Refactorizar para inyectar `now` habría sido ampliar alcance sin necesidad. Descartado explícitamente.
+- **Cubrir AMBAS fuentes de reloj.** El código usa luxon Y `Date` nativo; el mock fija los dos al mismo instante: `Settings.now = () => FIXED_TS` (luxon, que los fake timers de Jest NO tocan) + `jest.useFakeTimers({ now: FIXED_TS, doNotFake: [...todo salvo Date] })`. El `doNotFake` es deliberado: fingir setTimeout/microtasks colgaría los awaits del código async; solo se finge `Date`/`Date.now()`.
+- **FIXED_TS = 2026-07-10 09:00 Europe/Madrid**, construido con luxon (`DateTime.fromISO(...).toMillis()`) para ser DST-safe (julio = verano, UTC+2). Elegido anterior al 12/07 para que las tres anclas (12, 13, 14 jul) sean todas futuro respecto al now fijo, que es lo que sus tests prometen.
+- `beforeEach`/`afterEach` a nivel de archivo; teardown restaura AMBOS relojes (`Settings.now` real + `useRealTimers()`). Comentario en el spec advirtiendo de no volver a anclar tests a fechas relativas.
+
+**Verificación.** 44/44 en el archivo (antes 16 fallando). Suite completa 238/238 (15 suites) → el mock no se filtra a otros specs, corroborado empíricamente: los specs de ReminderProcessor loguean la fecha real (07/14) mientras bot-tools opera a 07/10 en la misma corrida. lint/typecheck/build verde (api + web). **Punto clave verificado explícitamente:** el test "fallo inesperado → error genérico" ejercita la ruta REAL del throw (llega a `appointmentsCreate` que lanza, entra al catch, devuelve el genérico), no un atajo del guard de hora — confirmado por el log `07/10/2026 9:00 ERROR [BotToolsService] ... failed unexpectedly / Error: db down` (timestamp del reloj fijo). Fix no superficial. Determinismo: argumento de construcción (ninguna ruta consulta otro reloj que el fijado) + corroboración de la suite; `libfaketime` no disponible en macOS.
+
+**Commit.** `test(api): tests deterministas en bot-tools.service.spec.ts (reloj fijo del spec)`
+
+**Deuda cerrada.** ✅ 13 tests no deterministas en bot-tools.service.spec.ts (eran 16 el día del fix).
 
 ### 2026-07-14 — Verificación en vivo de T7 (recordatorios) + retirada de flags de prueba
 
