@@ -87,9 +87,9 @@ lo cerró.
   desde los tool_results. Queda el caso sin efecto (fallo antes de actuar): el cliente no
   recibe nada (solo log); mensaje de cortesía pendiente. _(Generado en H2 T4, 07/07/26;
   retries resueltos en T5; silencio post-efecto resuelto en T6, 08/07/26.)_
-- [ ] **Devolución PENDING_REVIEW → BOT_ACTIVE solo por psql.** El bot nunca se auto-reactiva
+- [X] **Devolución PENDING_REVIEW → BOT_ACTIVE solo por psql.** El bot nunca se auto-reactiva
   (por diseño); la devolución manual es psql hasta el panel de conversaciones (Oleada 2).
-  _(Generado en H2 T6, 08/07/26.)_
+  _(Generado en H2 T6, 08/07/26.)(→ T9, cerrada en revisión del Camino A, 14/07/26.)_
 - [ ] **Reservas para terceros (producto).** Hoy: 1 Client por teléfono; el nombre del tercero
   se conserva como nota en la cita ("Reserva a nombre de: X (vía WhatsApp)") — paliativo.
   Soporte real de múltiples personas por teléfono: decisión de producto futura.
