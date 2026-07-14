@@ -177,6 +177,28 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-14 — #6: renderizar negrita de WhatsApp en las burbujas del panel
+
+**Qué se hizo.** El hilo del panel pintaba el body con `{message.body}` a pelo, así que los marcadores de negrita del bot salían con asteriscos crudos. Ahora un helper puro tokeniza la negrita a nodos React y las burbujas la muestran renderizada. Cierra la deuda "markdown de WhatsApp crudo en las burbujas" (abierta en T8).
+
+**Datos reales que guiaron el alcance** (294 mensajes en BD): 74 OUT con negrita en DOS convenciones — `*simple*` (plantilla de recordatorio, 3 msgs) y `**doble**` (texto libre de Claude, 71 msgs); los IN del cliente son texto plano. Cursiva (`_`), tachado (`~`) y monoespaciado NO aparecen nunca → no se soportan (alcance muerto). Saltos de línea ya funcionaban (whitespace-pre-wrap) → se preservan.
+
+**Decisiones clave.**
+- **Nodos React, no HTML (garantía anti-XSS por construcción).** `renderMessageBody(body): ReactNode[]` (helper puro en `lib/conversations/render-message-body.tsx`) tokeniza con una regex de alternación (`\*\*([^*]+)\*\*|\*([^*]+)\*`, `**` ANTES que `*`) y devuelve fragmentos de texto + `<strong>`. Cero `dangerouslySetInnerHTML`, cero string HTML intermedio. El body arbitrario del cliente sigue escapado por React → no puede interpretarse como HTML. Verificado en vivo: un `<b>hola</b>` enviado por WhatsApp se muestra como TEXTO LITERAL en el panel, no ejecutado.
+- **Ambas convenciones de negrita** cubiertas con `{m[1] ?? m[2]}` (grupo doble, o simple si undefined). Un parser de solo `*` habría roto los 71 `**...**` del bot.
+- `[^*]+` exige contenido no vacío sin asteriscos internos → los casos límite (asterisco suelto sin cerrar, `**`/`****` vacío) no matchean y caen a texto literal, sin crashear.
+- `m.index ?? last` para apaciguar el posible-undefined de TS sin cambiar la lógica.
+- Sin dependencias (react-markdown sería peso injustificado para `*` y `**`). `message-bubble.tsx` solo cambia el contenido del `<p>`, manteniendo `whitespace-pre-wrap break-words` → saltos intactos.
+
+**Comportamiento conocido (no bug).** Un caso raro tipo `*uno * dos*` (asterisco intermedio en negrita simple) matchea greedy y pinta negrita donde quizá no se quería. No aparece en los 294 mensajes reales (IN texto plano, OUT bien formados), no crashea ni abre XSS → aceptable por datos reales.
+
+**Verificación.** lint/typecheck/build de apps/web en verde (11 rutas); diff solo 2 archivos. Visual (Javier, navegador): recordatorios con `*...*` en negrita, texto plano del cliente igual, saltos respetados. **Seguridad dirigida (la crítica):** `<b>hola</b>` por WhatsApp → aparece literal en el panel, no renderizado. apps/web sigue sin runner de tests (deuda T9); el helper queda aislado y testeable para cuando exista.
+
+**Commit.** `feat(web): renderizar negrita de WhatsApp en las burbujas del panel`
+
+**Deuda cerrada.** ✅ Markdown de WhatsApp crudo en las burbujas del panel.
+
+
 ### 2026-07-14 — FIX: tests deterministas en bot-tools.service.spec.ts (reloj fijo)
 
 **Qué se hizo.** Los tests de `bot-tools.service.spec.ts` dependían del reloj real: fijaban expectativas para fechas ancladas a "hoy" (`MONDAY = '2026-07-13'` + dos más) mientras el código bajo test lee el reloj del sistema —luxon `DateTime.now()` (bot-tools.service.ts:322, :431) y `new Date()` (:352, :561, :649)—, así que pasaban o fallaban según el día de ejecución. Firma del bug: el 13/07 fallaban 13; el 14/07 ya fallaban 16 — el conteo dependía del día. Fix: reloj fijo en el spec, sin tocar producción.
