@@ -32,6 +32,9 @@ lo cerró.
   auditoría. Diferida, acoplada al futuro RolesGuard (quién puede verla). _(Generado en AuditLog, 01/07/26.)_
   - [ ] **Higiene de secretos pendiente.** Rotar verify token del webhook y regenerar el token
   temporal del panel (ambos expuestos en chat de trabajo). App Secret ya restablecido.
+  **Nota (14/07/26): evaluado y APARCADO de momento** — blast radius casi nulo (el verify token
+  solo interviene en el handshake de suscripción, la recepción se autentica por HMAC; el token
+  temporal ya está muerto por su caducidad de 24h). Retomar por higiene cuando convenga, sin urgencia.
   _(Generado en H2 T2-T3, 06/07/26.)_
   - [ ] **RGPD antes de clientes reales (DESTACADA).** Contrato de encargado del tratamiento con
   cada negocio + cifrado de datos en reposo. Requiere entidad legal. Bloquea lanzamiento, no
@@ -55,9 +58,17 @@ lo cerró.
   _(Generado en Ficha enriquecida, 01/07/26.)_
    [ ] **Normalización de teléfonos H1↔E.164.** H1 puede guardar teléfono local ("600…") y Meta
   manda internacional ("34600…"); si no casan, la vinculación Conversation→Client queda en
-  clientId null (seguro pero pierde el enlace). Unificar formato. _(Generado en H2 T2, 05/07/26.)_
+  clientId null (seguro pero pierde el enlace). Unificar formato.
+  **Matiz (14/07/26): el `+` inicial NO rompe** — un Client con `+34…` recibió su recordatorio sin
+  problema (Meta aceptó y devolvió wamid). El riesgo real está en los formatos LOCALES ("6XX…") que
+  no casan con el internacional de Meta. _(Generado en H2 T2, 05/07/26.)_
 - [ ] **Conversación fantasma de test (+34600000000) en BD.** Cerrarla (CLOSED) o asumirla como
   historial de test. _(Generado en H2 T3, 06/07/26.)_
+- [ ] **13 tests no deterministas en `bot-tools.service.spec.ts`.** Dependen del reloj real (fijan
+  expectativas para 2026-07-13 pero calculan huecos con la fecha actual → pasan o fallan según el
+  día de ejecución). Confirmado con git stash que fallan en main sin relación con ningún fix. Fix:
+  inyectar fecha/now fija (mock de DateTime.now o parámetro) para hacerlos deterministas.
+  _(Generado en Fix de fechas relativas, 13/07/26.)_
 
 ### IA / Bot (H2)
 - [ ] **Plantilla HSM para recordatorios fuera de ventana (DESTACADA).** El recordatorio 24h
@@ -97,6 +108,9 @@ lo cerró.
   request; cachear cuando el volumen lo justifique (fase 4 del doc técnico). _(Generado en H2 T4, 07/07/26.)_
 
 ### Frontend / UX
+- [ ] **Markdown de WhatsApp crudo en las burbujas del panel.** Los `*negrita*` de WhatsApp se
+  muestran con asteriscos literales en el hilo del panel de conversaciones; parsear a `<strong>`.
+  _(Generado en H2 T8, 09/07/26.)_
 - [ ] **Ficha enriquecida sin tags por actividad.** `computeTags` solo da VIP/NEW. Los tags
   derivados de comportamiento (REACTIVATE/REGULAR) quedaron fuera. _(Generado en Ficha enriquecida, 01/07/26.)_
 - [ ] **Gráfico "facturación últimos 6 meses" (Caja/Dashboard).** Requiere serie temporal
@@ -135,6 +149,8 @@ lo cerró.
 - [x] **AuditLog transversal.** Escritura de las 16 acciones (auth, clientes, servicios, citas, cobros).
   _(5 fuentes → AuditLog, 01/07/26.)_
 - [x] **Rate limiting en Auth.** login 5/min, register 3/min, refresh 10/min. _(Auth-1 → Rate limiting, 01/07/26.)_
+- [x] **Verificación en vivo de T7 (recordatorios).** Las 3 pruebas pendientes (limpieza de job al
+  cancelar / disparo diferido + envío / resiliencia Redis caído). _(→ Verificación en vivo T7, 14/07/26.)_
 
 ## Convenciones / Notas permanentes
 
@@ -157,6 +173,27 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 
 ## Asientos
+
+### 2026-07-14 — Verificación en vivo de T7 (recordatorios) + retirada de flags de prueba
+
+**Qué se hizo.** Cerrada la verificación en vivo pendiente de T7 (las 3 pruebas anotadas el 08/07), y retirados los flags de prueba de recordatorios del .env de desarrollo. Sin cambios de código: T7 ya estaba en main; esta sesión solo ejerció el comportamiento ya implementado y confirmó los tres contratos en vivo.
+
+**Las 3 pruebas (verificadas por Javier).**
+- **(a) Limpieza del job al cancelar.** Cita creada por web → job programado en Redis con `jobId = appointmentId` (`bull:appointment-reminders:019f6176-…` verificado con `redis-cli keys`) → cancelada por web → la key del job desaparece. El gancho de `cancel` (H1) llama a `RemindersService.cancel(appointmentId)` y BullMQ borra el job por su jobId determinista. ✅
+- **(c) Disparo diferido + envío (el tramo nunca probado en vivo).** Con `REMINDERS_LEAD_MINUTES=5`, cita a +10 min → el processor disparó solo tras el delay, releyó la cita, compuso el texto y lo envió por WhatsApp. **Recordatorio recibido en el móvil.** Evidencia dura en psql: Message OUT/BOT con `metadata { reminder: true, appointmentId: "019f618e-…" }` y `waMessageId` real de Meta. El texto compuso hora en zona del negocio ("a las 19:06") y referencia relativa correcta ("tu cita de hoy"). ✅
+- **(b) Resiliencia Redis caído ("Redis caído ≠ citas rotas").** `docker stop onpilot_redis` → cita creada por web (`019f619f-…`) → **se crea igual y viva** (visible en Appointment, sin `deletedAt`), respondiendo rápido. En el log: `Error: Stream isn't writeable and enableOfflineQueue options is false` — el producer falla al instante (no cuelga el await) y el fallo de `schedule` queda capturado sin propagarse; el ruido en cascada de ECONNREFUSED es el Worker reintentando (retryStrategy). `docker start onpilot_redis` → el Worker reconecta solo y el log vuelve a la calma. ✅
+
+**Hallazgo (favorable) sobre la deuda H1↔E.164.** El Client del recordatorio tenía el teléfono con `+` (`+34644207040`); temíamos que el `+` rompiera el envío. No lo rompe: Meta aceptó y devolvió wamid, y el mensaje llegó. La deuda de normalización sigue abierta (los formatos locales "6XX…" sí romperían el matching conversación↔Client), pero por esta vía el `+` no es el problema — matiz añadido a la deuda.
+
+**Verificación cruzada de rebote.** En la misma sesión, "¿cerráis el lunes?" → "no, abrimos L-V, el domingo es el único día que cerramos": el fix del mini-calendario del 13/07 aguantando en vivo.
+
+**Retirada de flags (punto #2 del Camino A).** Eliminada la línea `REMINDERS_LEAD_MINUTES` del .env de dev (era override solo-pruebas: forzaba disparo a 5 min en vez de 24h). `REMINDERS_ENABLED` → false en dev (T7 ya verificado; evita ruido de jobs/Redis en el log durante el trabajo normal; reactivable puntualmente). Arranque de la API confirmado sin el WARN de `REMINDERS_LEAD_MINUTES`. Cambio en .env (gitignored) → sin commit de código.
+
+**Herramienta de sesión.** Adoptado Prisma Studio (`pnpm --filter api exec prisma studio`) como visor de BD para inspección de filas durante la verificación — cómodo para Client/Conversation/Message/Appointment; el log del processor (wamid) se sigue leyendo en la terminal de `pnpm dev:api`.
+
+**Commit.** Solo devlog (docs). La verificación en vivo y el ajuste de .env no generan commit de código.
+
+**Deuda.** Cerrada la "verificación en vivo de T7 pendiente" (los 3 puntos). Sigue abierta la normalización H1↔E.164 (con matiz: el `+` no rompe, los formatos locales sí). Resto del Camino A pendiente: 13 tests no deterministas, docs (05-database-model + §8), markdown en burbujas del panel — todos ya en el listado de deuda de arriba. Higiene de secretos: aparcada por decisión (nota en la deuda).
 
 ### 2026-07-13 — FIX: resolución de fechas relativas y confabulación de horario (mini-calendario en el prompt)
 
@@ -293,7 +330,7 @@ Dos fixes de la misma familia (el bot y el tiempo), detectados en la verificaci�
 
 **Deuda nueva.** Plantilla HSM aprobada para el 131047 (DESTACADA pre-lanzamiento): en v1 el recordatorio es texto libre y muere si la ventana de 24h está cerrada — justo el caso típico de un recordatorio a alguien que no ha escrito hoy. Antelación fija en 24h (constante con comentario "futuro BotConfig"). El recordatorio a clientes de la web depende de la normalización H1↔E.164 (deuda ya abierta): si el teléfono se guardó en local, no casa con la conversación y el envío falla contra Meta.
 
-**Verificación en vivo (pendiente, la hace Javier).** `REMINDERS_ENABLED=true` + `REMINDERS_LEAD_MINUTES=5` → cita a +10 min → recordatorio al móvil a los ~5; responder "cancélala" (T6); ver aparecer/desaparecer el job en `redis-cli keys` al crear/cancelar; parar Redis y crear cita (se crea igual, ERROR en log).
+**Verificación en vivo (pendiente, la hace Javier).** `REMINDERS_ENABLED=true` + `REMINDERS_LEAD_MINUTES=5` → cita a +10 min → recordatorio al móvil a los ~5; responder "cancélala" (T6); ver aparecer/desaparecer el job en `redis-cli keys` al crear/cancelar; parar Redis y crear cita (se crea igual, ERROR en log). **[CERRADA el 14/07/26 — ver asiento de esa fecha.]**
 
 ### 2026-07-08 — H2 Tarea 6: Escalado real + cancelar/reprogramar
 
