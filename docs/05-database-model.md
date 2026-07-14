@@ -399,71 +399,61 @@ updatedAt
 
 ## Conversation
 
-Fase 2.
+Fase 2 (H2 — WhatsApp Automático). Conversación de WhatsApp con un interlocutor.
+**Refleja el schema real construido** (ver `apps/api/prisma/schema.prisma`).
 
-Conversación de WhatsApp.
+Campos:
+  id             String    @id @default(uuid(7)) @db.Uuid
+  businessId     String    @db.Uuid
+  clientId       String?   @db.Uuid   — nullable: puede escribir un desconocido que aún no es cliente
+  phone          String                — teléfono del interlocutor en E.164 normalizado
+  status         ConversationStatus @default(BOT_ACTIVE)
+  lastMessageAt  DateTime?
+  contextSummary String?               — resumen de conversación larga (lo generará el BotEngine en tareas futuras; hoy sin implementar)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?             — soft delete
 
-Campos previstos:
+Estados (`ConversationStatus`):
+  BOT_ACTIVE      — el bot atiende
+  PENDING_REVIEW  — escalado; el bot calla, espera atención humana
+  HUMAN_CONTROL   — un humano tomó el control desde el panel
+  CLOSED          — cerrada (historial); se acumulan varias CLOSED por teléfono
 
-```txt
-id
-businessId
-clientId
-externalPhone
-status
-channel
-lastMessageAt
-createdAt
-updatedAt
-```
+Relaciones: business (Restrict), client? (Restrict), messages Message[].
+Índice: `@@index([businessId, status, lastMessageAt])` (lista del panel).
+Invariante SQL (en la migración, no en schema.prisma): único parcial `(businessId, phone)`
+WHERE `status <> 'CLOSED' AND deletedAt IS NULL` — una sola conversación abierta por teléfono/negocio.
 
-Estados:
-
-```txt
-BOT_ACTIVE
-PENDING_REVIEW
-HUMAN_CONTROL
-CLOSED
-```
-
----
+> **Nota de canalidad.** No hay campo `channel` en el schema. La multicanalidad vive hoy como
+> concepto de código en el `WhatsAppAdapter` (capa de envío intercambiable, interfaz `to, body → wamid`),
+> no como columna. Si una v2 multicanal necesitara discriminar por canal en BD, se reintroduciría entonces.
 
 ## Message
 
-Fase 2.
+Fase 2 (H2). Mensaje individual dentro de una conversación. **Refleja el schema real construido.**
 
-Mensaje individual dentro de una conversación.
+Campos:
+  id             String    @id @default(uuid(7)) @db.Uuid
+  businessId     String    @db.Uuid   — denormalizado a propósito: filtro multi-tenant directo sin join + habilita el índice de idempotencia por negocio
+  conversationId String    @db.Uuid
+  direction      MessageDirection
+  author         MessageAuthor
+  body           String
+  waMessageId    String?               — id del mensaje en WhatsApp; clave de idempotencia (Meta reintenta webhooks)
+  metadata       Json?                 — tokens/coste aprox del bot, motivo de escalado, marca de recordatorio, etc.
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?             — soft delete
 
-Campos previstos:
+Dirección (`MessageDirection`): IN / OUT
+Autor (`MessageAuthor`): CLIENT / BOT / HUMAN
 
-```txt
-id
-businessId
-conversationId
-direction
-senderType
-body
-externalMessageId
-createdAt
-```
-
-Direction:
-
-```txt
-INBOUND
-OUTBOUND
-```
-
-Sender type:
-
-```txt
-CLIENT
-BOT
-HUMAN
-SYSTEM
-```
-
----
+Relaciones: business (Restrict), conversation (Restrict). Todas las FKs `onDelete: Restrict`
+(los mensajes son material de auditoría; un DELETE físico accidental debe fallar ruidosamente).
+Índice: `@@index([conversationId, createdAt])` (hilo).
+Invariante SQL: único parcial `(businessId, waMessageId)` WHERE `waMessageId IS NOT NULL AND deletedAt IS NULL` (idempotencia de webhook).
+CHECK de coherencia dirección/autor: `IN`→`CLIENT`, `OUT`→`BOT|HUMAN`.
 
 ## IntegrationConnection
 

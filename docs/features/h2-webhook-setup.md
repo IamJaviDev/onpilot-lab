@@ -337,10 +337,20 @@ Con el token de §7 y `ANTHROPIC_API_KEY` ya en `.env`:
 5. **Prueba de estados** (el sistema calla fuera de BOT_ACTIVE; actualizar por
    id, como aprendimos):
 
-   ```bash
+   Primero localiza el id de la conversación (los pasos usan <CONVERSATION_ID> pero nunca explican
+   cómo obtenerlo; apúntalo explícitamente para no tocar la conversación equivocada — p. ej. la
+   fantasma de los curls de pruebas):
+
+```bash
+   psql "$DATABASE_URL" -c 'select id, phone, status from "Conversation" order by "lastMessageAt" desc nulls last;'
+```
+
+   Copia el id de la conversación real (por su phone) y úsalo en el update de abajo.
+
+```bash
    # pasar la conversación a control humano
    psql "$DATABASE_URL" -c 'update "Conversation" set status = '"'"'HUMAN_CONTROL'"'"' where id = '"'"'<CONVERSATION_ID>'"'"';'
-   ```
+```
 
    Mensaje desde el móvil → **silencio** (el IN sí se persiste). Devuélvela a
    `BOT_ACTIVE` al terminar.

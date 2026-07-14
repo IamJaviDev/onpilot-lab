@@ -177,6 +177,22 @@ No son deuda (no se cierran); son recordatorios vivos del proyecto.
 
 ## Asientos
 
+### 2026-07-14 — #5: alinear docs de modelo de datos y setup de webhook con el código
+
+**Qué se hizo.** Dos microtareas de documentación del Camino A. (1) `docs/05-database-model.md` describía un diseño de mensajería PREVIO al construido en H2 — alineado con el schema real. (2) `docs/features/h2-webhook-setup.md §8` no explicaba cómo obtener el id de conversación para la prueba de estados — añadido el `select` que lo localiza.
+
+**Alineación de 05-database-model.md (secciones Conversation y Message).** Correcciones doc→real: `externalPhone`→`phone` (E.164); `channel` **eliminado** (no existe en el schema); `senderType`(enum SenderType, con SYSTEM)→`author`(enum MessageAuthor, sin SYSTEM: CLIENT/BOT/HUMAN); `externalMessageId`→`waMessageId` (clave de idempotencia); direcciones INBOUND/OUTBOUND→IN/OUT; añadidos los campos reales que faltaban (`contextSummary`, `metadata` Json, `businessId` denormalizado en Message, `updatedAt`, `deletedAt`) y los invariantes SQL (únicos parciales, CHECK dirección/autor). Los enums de mensajería se describen inline en cada sección (convención del propio doc), no en `## Enums iniciales` — no se tocó esa sección. H1 intacto (solo se reescribieron las dos secciones de H2).
+
+**Decisión de `channel` cerrada.** La deuda preguntaba si `channel` vuelve al schema en v2 o queda como concepto del adapter. Los hechos: no existe como columna; la multicanalidad vive en el `WhatsAppAdapter` (capa de envío intercambiable, interfaz `to, body → wamid`). El doc lo afirma: canal = concepto de código, no columna; si una v2 multicanal necesitara discriminar por canal en BD, se reintroduciría entonces.
+
+**Añadido en h2-webhook-setup.md §8.** Al inicio del paso 5 (prueba de estados), un `select id, phone, status from "Conversation"` para localizar y apuntar el id explícito antes del `update` a HUMAN_CONTROL — cierra el tropiezo de T3 (el UPDATE que tocó la conversación fantasma +34600000000 en vez de la real).
+
+**Verificación.** Solo docs; sin código, sin referencias cruzadas rotas. Contraste textual contra `schema.prisma` real (modelos Conversation/Message + 3 enums), no de memoria.
+
+**Commit.** `docs: alinear modelo de datos y setup de webhook con el código (H2)`
+
+**Deuda cerrada.** ✅ 05-database-model.md desfasado. ✅ h2-webhook-setup.md §8: UPDATE por id explícito.
+
 ### 2026-07-14 — #6: renderizar negrita de WhatsApp en las burbujas del panel
 
 **Qué se hizo.** El hilo del panel pintaba el body con `{message.body}` a pelo, así que los marcadores de negrita del bot salían con asteriscos crudos. Ahora un helper puro tokeniza la negrita a nodos React y las burbujas la muestran renderizada. Cierra la deuda "markdown de WhatsApp crudo en las burbujas" (abierta en T8).
